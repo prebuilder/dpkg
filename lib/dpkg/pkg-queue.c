@@ -75,11 +75,11 @@ pkg_queue_is_empty(struct pkg_queue *queue)
  * @return The newly inserted pkg_list node.
  */
 struct pkg_list *
-pkg_queue_push(struct pkg_queue *queue, struct pkginfo *pkg)
+pkg_queue_push(struct pkg_queue *queue, struct pkginfo_pair pair)
 {
 	struct pkg_list *node;
 
-	node = pkg_list_new(pkg, NULL);
+	node = pkg_list_new(pair, NULL);
 
 	if (queue->tail == NULL)
 		queue->head = node;
@@ -103,17 +103,18 @@ pkg_queue_push(struct pkg_queue *queue, struct pkginfo *pkg)
  *
  * @return The pkginfo from the removed node, or NULL if the queue was empty.
  */
-struct pkginfo *
+struct pkginfo_pair
 pkg_queue_pop(struct pkg_queue *queue)
 {
 	struct pkg_list *node;
-	struct pkginfo *pkg;
+	struct pkginfo_pair pair;
+	pair.source = __func__;
 
 	if (pkg_queue_is_empty(queue))
-		return NULL;
+		return EMPTY_PAIR;
 
 	node = queue->head;
-	pkg = node->pkg;
+	pair = node->pair;
 
 	queue->head = node->next;
 	if (queue->head == NULL)
@@ -122,5 +123,5 @@ pkg_queue_pop(struct pkg_queue *queue)
 	free(node);
 	queue->length--;
 
-	return pkg;
+	return pair;
 }

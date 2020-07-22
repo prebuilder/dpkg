@@ -256,9 +256,9 @@ listpackages(const char *const *argv)
   struct pager *pager;
 
   if (!opt_loadavail)
-    modstatdb_open(msdbrw_readonly);
+    modstatdb_open(msdbrw_readonly, NULL);
   else
-    modstatdb_open(msdbrw_readonly | msdbrw_available_readonly);
+    modstatdb_open(msdbrw_readonly | msdbrw_available_readonly, NULL);
 
   pkg_array_init_from_hash(&array);
   pkg_array_sort(&array, pkg_sorter_by_nonambig_name_arch);
@@ -342,7 +342,7 @@ searchfiles(const char *const *argv)
   if (!*argv)
     badusage(_("--search needs at least one file name pattern argument"));
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
   ensure_allinstfiles_available_quiet();
   ensure_diversions();
 
@@ -397,7 +397,7 @@ print_status(const char *const *argv)
   struct pkginfo *pkg;
   int failures = 0;
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   if (!*argv) {
     writedb_records(stdout, _("<standard output>"), 0);
@@ -442,7 +442,7 @@ print_avail(const char *const *argv)
   struct pkginfo *pkg;
   int failures = 0;
 
-  modstatdb_open(msdbrw_readonly | msdbrw_available_readonly);
+  modstatdb_open(msdbrw_readonly | msdbrw_available_readonly, NULL);
 
   if (!*argv) {
     writedb_records(stdout, _("<standard output>"), wdb_dump_available);
@@ -484,7 +484,7 @@ list_files(const char *const *argv)
   if (!*argv)
     badusage(_("--%s needs at least one package name argument"), cipaction->olong);
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   while ((thisarg = *argv++) != NULL) {
     pkg = dpkg_options_parse_pkgname(cipaction, thisarg);
@@ -576,9 +576,9 @@ showpackages(const char *const *argv)
   fmt_needs_db_fsys = pkg_format_needs_db_fsys(fmt);
 
   if (!opt_loadavail)
-    modstatdb_open(msdbrw_readonly);
+    modstatdb_open(msdbrw_readonly, NULL);
   else
-    modstatdb_open(msdbrw_readonly | msdbrw_available_readonly);
+    modstatdb_open(msdbrw_readonly | msdbrw_available_readonly, NULL);
 
   pkg_array_init_from_hash(&array);
   pkg_array_sort(&array, pkg_sorter_by_nonambig_name_arch);
@@ -685,7 +685,7 @@ control_path(const char *const *argv)
   if (control_file)
     pkg_infodb_check_filetype(control_file);
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   pkg = dpkg_options_parse_pkgname(cipaction, pkgname);
   if (pkg->status == PKG_STAT_NOTINSTALLED)
@@ -712,7 +712,7 @@ control_list(const char *const *argv)
   if (!pkgname || *argv)
     badusage(_("--%s takes one package name argument"), cipaction->olong);
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   pkg = dpkg_options_parse_pkgname(cipaction, pkgname);
   if (pkg->status == PKG_STAT_NOTINSTALLED)
@@ -744,7 +744,7 @@ control_show(const char *const *argv)
 
   pkg_infodb_check_filetype(control_file);
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   pkg = dpkg_options_parse_pkgname(cipaction, pkgname);
   if (pkg->status == PKG_STAT_NOTINSTALLED)

@@ -92,16 +92,16 @@
 static struct pkg_queue deferred = PKG_QUEUE_INIT;
 
 static void
-trigproc_enqueue_deferred(struct pkginfo *pend)
+trigproc_enqueue_deferred(struct pkginfo_pair pair)
 {
 	if (f_triggers < 0)
 		return;
-	ensure_package_clientdata(pend);
-	if (pend->clientdata->trigprocdeferred)
+	ensure_package_clientdata(pair.triggeree);
+	if (pair.triggeree->clientdata->trigprocdeferred)
 		return;
-	pend->clientdata->trigprocdeferred = pkg_queue_push(&deferred, pend);
+	pair.triggeree->clientdata->trigprocdeferred = pkg_queue_push(&deferred, pair);
 	debug(dbg_triggers, "trigproc_enqueue_deferred pend=%s",
-	      pkg_name(pend, pnaw_always));
+	      pkg_name(pair.triggeree, pnaw_always));
 }
 
 /**
@@ -120,25 +120,32 @@ trigproc_enqueue_deferred(struct pkginfo *pend)
  * XXX: This can be removed once apt is fixed in the next stable release.
  */
 void
-trigproc_populate_deferred(void)
+trigproc_populate_deferred(struct pkginfo *triggerer_pkg)
 {
 	struct pkg_hash_iter *iter;
-	struct pkginfo *pkg;
+	struct pkginfo_pair pair;
+	pair.triggerer = triggerer_pkg;
+	pair.source = __func__;
 
 	iter = pkg_hash_iter_new();
-	while ((pkg = pkg_hash_iter_next_pkg(iter))) {
-		if (!pkg->trigpend_head)
+	while ((pair.triggeree = pkg_hash_iter_next_pkg(iter))) {
+		if(triggerer_pkg == NULL){
+			pair.triggerer = pair.triggeree;
+		}
+		if (!pair.triggeree->trigpend_head)
 			continue;
 
-		if (pkg->status != PKG_STAT_TRIGGERSAWAITED &&
-		    pkg->status != PKG_STAT_TRIGGERSPENDING)
+		if (pair.triggeree->status != PKG_STAT_TRIGGERSAWAITED &&
+		    pair.triggeree->status != PKG_STAT_TRIGGERSPENDING)
 			continue;
 
-		if (pkg->want != PKG_WANT_INSTALL &&
-		    pkg->want != PKG_WANT_HOLD)
+		if (pair.triggeree->want != PKG_WANT_INSTALL &&
+		    pair.triggeree->want != PKG_WANT_HOLD)
 			continue;
 
-		trigproc_enqueue_deferred(pkg);
+
+
+		trigproc_enqueue_deferred(pair);
 	}
 	pkg_hash_iter_free(iter);
 }
@@ -150,10 +157,10 @@ trigproc_run_deferred(void)
 
 	debug(dbg_triggers, "trigproc_run_deferred");
 	while (!pkg_queue_is_empty(&deferred)) {
-		struct pkginfo *pkg;
+		struct pkginfo_pair pair;
 
-		pkg  = pkg_queue_pop(&deferred);
-		if (!pkg)
+		pair  = pkg_queue_pop(&deferred);
+		if (!pair.triggeree)
 			continue;
 
 		if (setjmp(ejbuf)) {
@@ -161,11 +168,11 @@ trigproc_run_deferred(void)
 			continue;
 		}
 		push_error_context_jump(&ejbuf, print_error_perpackage,
-		                        pkg_name(pkg, pnaw_nonambig));
+		                        pkg_name(pair.triggeree, pnaw_nonambig));
 
-		ensure_package_clientdata(pkg);
-		pkg->clientdata->trigprocdeferred = NULL;
-		trigproc(pkg, TRIGPROC_TRY_DEFERRED);
+		ensure_package_clientdata(pair.triggeree);
+		pair.triggeree->clientdata->trigprocdeferred = NULL;
+		trigproc(pair, TRIGPROC_TRY_DEFERRED);
 
 		pop_error_context(ehflag_normaltidy);
 	}
@@ -357,7 +364,7 @@ check_trigger_cycle(struct pkginfo *processing_now)
 		          pkg_status_name(giveup));
 	giveup->clientdata->istobe = PKG_ISTOBE_NORMAL;
 	pkg_set_status(giveup, PKG_STAT_HALFCONFIGURED);
-	modstatdb_note(giveup);
+	modstatdb_note_pair((struct pkginfo_pair) {giveup, giveup, __func__});
 	print_error_perpackage(_("triggers looping, abandoned"),
 	                       pkg_name(giveup, pnaw_nonambig));
 
@@ -369,7 +376,7 @@ check_trigger_cycle(struct pkginfo *processing_now)
  * that case does nothing but fix up any stale awaiters.
  */
 void
-trigproc(struct pkginfo *pkg, enum trigproc_type type)
+trigproc(struct pkginfo_pair pair, enum trigproc_type type)
 {
 	static struct varbuf namesarg;
 
@@ -377,45 +384,45 @@ trigproc(struct pkginfo *pkg, enum trigproc_type type)
 	struct trigpend *tp;
 	struct pkginfo *gaveup;
 
-	debug(dbg_triggers, "trigproc %s", pkg_name(pkg, pnaw_always));
+	debug(dbg_triggers, "trigproc %s", pkg_name(pair.triggeree, pnaw_always));
 
-	ensure_package_clientdata(pkg);
-	if (pkg->clientdata->trigprocdeferred)
-		pkg->clientdata->trigprocdeferred->pkg = NULL;
-	pkg->clientdata->trigprocdeferred = NULL;
+	ensure_package_clientdata(pair.triggeree);
+	if (pair.triggeree->clientdata->trigprocdeferred)
+		pair.triggeree->clientdata->trigprocdeferred->pair.triggeree = NULL;
+	pair.triggeree->clientdata->trigprocdeferred = NULL;
 
-	if (pkg->trigpend_head) {
+	if (pair.triggeree->trigpend_head) {
 		enum dep_check ok;
 
-		if (pkg->status != PKG_STAT_TRIGGERSPENDING &&
-		    pkg->status != PKG_STAT_TRIGGERSAWAITED)
+		if (pair.triggeree->status != PKG_STAT_TRIGGERSPENDING &&
+		    pair.triggeree->status != PKG_STAT_TRIGGERSAWAITED)
 			internerr("package %s in non-trigger state %s",
-			          pkg_name(pkg, pnaw_always),
-			          pkg_status_name(pkg));
+			          pkg_name(pair.triggeree, pnaw_always),
+			          pkg_status_name(pair.triggeree));
 
 		if (dependtry < DEPEND_TRY_TRIGGERS &&
 		    type == TRIGPROC_TRY_QUEUED) {
 			/* We are not yet in a triggers run, so postpone this
 			 * package completely. */
-			enqueue_package(pkg);
+			enqueue_pair(pair);
 			return;
 		}
 
 		if (dependtry >= DEPEND_TRY_CYCLES) {
-			if (findbreakcycle(pkg))
+			if (findbreakcycle(pair.triggeree))
 				sincenothing = 0;
 		}
 
-		ok = dependencies_ok(pkg, NULL, &depwhynot);
+		ok = dependencies_ok(pair.triggeree, NULL, &depwhynot);
 		if (ok == DEP_CHECK_DEFER) {
 			if (dependtry >= DEPEND_TRY_TRIGGERS_CYCLES) {
-				gaveup = check_trigger_cycle(pkg);
-				if (gaveup == pkg)
+				gaveup = check_trigger_cycle(pair.triggeree);
+				if (gaveup == pair.triggeree)
 					return;
 			}
 
 			varbuf_destroy(&depwhynot);
-			enqueue_package(pkg);
+			enqueue_pair(pair);
 			return;
 		} else if (ok == DEP_CHECK_HALT) {
 			/* When doing opportunistic deferred trigger processing,
@@ -437,28 +444,28 @@ trigproc(struct pkginfo *pkg, enum trigproc_type type)
 			varbuf_end_str(&depwhynot);
 			notice(_("dependency problems prevent processing "
 			         "triggers for %s:\n%s"),
-			       pkg_name(pkg, pnaw_nonambig), depwhynot.buf);
+			       pkg_name(pair.triggeree, pnaw_nonambig), depwhynot.buf);
 			varbuf_destroy(&depwhynot);
 			ohshit(_("dependency problems - leaving triggers unprocessed"));
 		} else if (depwhynot.used) {
 			varbuf_end_str(&depwhynot);
 			notice(_("%s: dependency problems, but processing "
 			         "triggers anyway as you requested:\n%s"),
-			       pkg_name(pkg, pnaw_nonambig), depwhynot.buf);
+			       pkg_name(pair.triggeree, pnaw_nonambig), depwhynot.buf);
 			varbuf_destroy(&depwhynot);
 		}
 
-		gaveup = check_trigger_cycle(pkg);
-		if (gaveup == pkg)
+		gaveup = check_trigger_cycle(pair.triggeree);
+		if (gaveup == pair.triggeree)
 			return;
 
 		printf(_("Processing triggers for %s (%s) ...\n"),
-		       pkg_name(pkg, pnaw_nonambig),
-		       versiondescribe(&pkg->installed.version, vdew_nonambig));
-		log_action("trigproc", pkg, &pkg->installed);
+		       pkg_name(pair.triggeree, pnaw_nonambig),
+		       versiondescribe(&pair.triggeree->installed.version, vdew_nonambig));
+		log_action("trigproc", pair.triggeree, &pair.triggeree->installed);
 
 		varbuf_reset(&namesarg);
-		for (tp = pkg->trigpend_head; tp; tp = tp->next) {
+		for (tp = pair.triggeree->trigpend_head; tp; tp = tp->next) {
 			varbuf_add_char(&namesarg, ' ');
 			varbuf_add_str(&namesarg, tp->name);
 		}
@@ -466,20 +473,20 @@ trigproc(struct pkginfo *pkg, enum trigproc_type type)
 
 		/* Setting the status to half-configured
 		 * causes modstatdb_note to clear pending triggers. */
-		pkg_set_status(pkg, PKG_STAT_HALFCONFIGURED);
-		modstatdb_note(pkg);
+		pkg_set_status(pair.triggeree, PKG_STAT_HALFCONFIGURED);
+		modstatdb_note_pair(pair);
 
 		if (!f_noact) {
 			sincenothing = 0;
-			maintscript_postinst(pkg, "triggered",
+			maintscript_postinst_pair(pair, "triggered",
 			                     namesarg.buf + 1, NULL);
 		}
 
-		post_postinst_tasks(pkg, PKG_STAT_INSTALLED);
+		post_postinst_tasks(pair, PKG_STAT_INSTALLED);
 	} else {
 		/* In other branch is done by modstatdb_note(), from inside
 		 * post_postinst_tasks(). */
-		trig_clear_awaiters(pkg);
+		trig_clear_awaiters(pair);
 	}
 }
 
@@ -553,7 +560,7 @@ trig_transitional_activate(enum modstatdb_rw cstatus)
 
 	if (cstatus >= msdbrw_write) {
 		modstatdb_checkpoint();
-		trig_file_interests_save();
+		trig_file_interests_save(NULL);
 	}
 }
 

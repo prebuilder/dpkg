@@ -343,13 +343,13 @@ promptconfaction(struct pkginfo *pkg, const char *cfgfile,
  * @param conff	The current conffile being configured.
  */
 static void
-deferred_configure_ghost_conffile(struct pkginfo *pkg, struct conffile *conff)
+deferred_configure_ghost_conffile(struct pkginfo_pair pair, struct conffile *conff)
 {
 	struct pkginfo *otherpkg;
 	struct conffile *otherconff;
 
-	for (otherpkg = &pkg->set->pkg; otherpkg; otherpkg = otherpkg->arch_next) {
-		if (otherpkg == pkg)
+	for (otherpkg = &pair.triggeree->set->pkg; otherpkg; otherpkg = otherpkg->arch_next) {
+		if (otherpkg == pair.triggeree)
 			continue;
 		if (otherpkg->status <= PKG_STAT_HALFCONFIGURED)
 			continue;
@@ -364,7 +364,7 @@ deferred_configure_ghost_conffile(struct pkginfo *pkg, struct conffile *conff)
 			 * instance. */
 			if (strcmp(otherconff->name, conff->name) == 0) {
 				conff->hash = otherconff->hash;
-				modstatdb_note(pkg);
+				modstatdb_note_pair(pair);
 				return;
 			}
 		}
@@ -372,7 +372,7 @@ deferred_configure_ghost_conffile(struct pkginfo *pkg, struct conffile *conff)
 }
 
 static void
-deferred_configure_conffile(struct pkginfo *pkg, struct conffile *conff)
+deferred_configure_conffile(struct pkginfo_pair pair, struct conffile *conff)
 {
 	struct fsys_namenode *usenode;
 	char currenthash[MD5HASHLEN + 1], newdisthash[MD5HASHLEN + 1];
@@ -384,14 +384,14 @@ deferred_configure_conffile(struct pkginfo *pkg, struct conffile *conff)
 	int rc;
 
 	usenode = namenodetouse(fsys_hash_find_node(conff->name, FHFF_NOCOPY),
-                                pkg, &pkg->installed);
+                                pair.triggeree, &pair.triggeree->installed);
 
-	rc = conffderef(pkg, &cdr, usenode->name);
+	rc = conffderef(pair.triggeree, &cdr, usenode->name);
 	if (rc == -1) {
 		conff->hash = EMPTYHASHFLAG;
 		return;
 	}
-	md5hash(pkg, currenthash, cdr.buf);
+	md5hash(pair.triggeree, currenthash, cdr.buf);
 
 	varbuf_reset(&cdr2);
 	varbuf_add_str(&cdr2, cdr.buf);
@@ -443,13 +443,13 @@ deferred_configure_conffile(struct pkginfo *pkg, struct conffile *conff)
 		if (errno == ENOENT) {
 			/* But, sync the conffile hash value from another
 			 * package set instance. */
-			deferred_configure_ghost_conffile(pkg, conff);
+			deferred_configure_ghost_conffile(pair, conff);
 			return;
 		}
 		ohshite(_("unable to stat new distributed conffile '%.250s'"),
 		        cdr2.buf);
 	}
-	md5hash(pkg, newdisthash, cdr2.buf);
+	md5hash(pair.triggeree, newdisthash, cdr2.buf);
 
 	/* Copy the permissions from the installed version to the new
 	 * distributed version. */
@@ -503,7 +503,7 @@ deferred_configure_conffile(struct pkginfo *pkg, struct conffile *conff)
 	      "deferred_configure '%s' (= '%s') useredited=%d distedited=%d what=%o",
 	      usenode->name, cdr.buf, useredited, distedited, what);
 
-	what = promptconfaction(pkg, usenode->name, cdr.buf, cdr2.buf,
+	what = promptconfaction(pair.triggeree, usenode->name, cdr.buf, cdr2.buf,
 	                        useredited, distedited, what);
 
 	switch (what & ~(CFOF_IS_NEW | CFOF_USER_DEL)) {
@@ -511,40 +511,40 @@ deferred_configure_conffile(struct pkginfo *pkg, struct conffile *conff)
 		strcpy(cdr2rest, DPKGOLDEXT);
 		if (unlink(cdr2.buf) && errno != ENOENT)
 			warning(_("%s: failed to remove old backup '%.250s': %s"),
-			        pkg_name(pkg, pnaw_nonambig), cdr2.buf,
+			        pkg_name(pair.triggeree, pnaw_nonambig), cdr2.buf,
 			        strerror(errno));
 
 		varbuf_add_str(&cdr, DPKGDISTEXT);
 		varbuf_end_str(&cdr);
 		strcpy(cdr2rest, DPKGNEWEXT);
-		trig_path_activate(usenode, pkg);
+		trig_path_activate(usenode, pair.triggeree);
 		if (rename(cdr2.buf, cdr.buf))
 			warning(_("%s: failed to rename '%.250s' to '%.250s': %s"),
-			        pkg_name(pkg, pnaw_nonambig), cdr2.buf, cdr.buf,
+			        pkg_name(pair.triggeree, pnaw_nonambig), cdr2.buf, cdr.buf,
 			        strerror(errno));
 		break;
 	case CFO_KEEP:
 		strcpy(cdr2rest, DPKGNEWEXT);
 		if (unlink(cdr2.buf))
 			warning(_("%s: failed to remove '%.250s': %s"),
-			        pkg_name(pkg, pnaw_nonambig), cdr2.buf,
+			        pkg_name(pair.triggeree, pnaw_nonambig), cdr2.buf,
 			        strerror(errno));
 		break;
 	case CFO_INSTALL | CFOF_BACKUP:
 		strcpy(cdr2rest, DPKGDISTEXT);
 		if (unlink(cdr2.buf) && errno != ENOENT)
 			warning(_("%s: failed to remove old distributed version '%.250s': %s"),
-			        pkg_name(pkg, pnaw_nonambig), cdr2.buf,
+			        pkg_name(pair.triggeree, pnaw_nonambig), cdr2.buf,
 			        strerror(errno));
 		strcpy(cdr2rest, DPKGOLDEXT);
 		if (unlink(cdr2.buf) && errno != ENOENT)
 			warning(_("%s: failed to remove '%.250s' (before overwrite): %s"),
-			        pkg_name(pkg, pnaw_nonambig), cdr2.buf,
+			        pkg_name(pair.triggeree, pnaw_nonambig), cdr2.buf,
 			        strerror(errno));
 		if (!(what & CFOF_USER_DEL))
 			if (link(cdr.buf, cdr2.buf))
 				warning(_("%s: failed to link '%.250s' to '%.250s': %s"),
-				        pkg_name(pkg, pnaw_nonambig), cdr.buf,
+				        pkg_name(pair.triggeree, pnaw_nonambig), cdr.buf,
 				        cdr2.buf, strerror(errno));
 		/* Fall through. */
 	case CFO_INSTALL:
@@ -553,7 +553,7 @@ deferred_configure_conffile(struct pkginfo *pkg, struct conffile *conff)
 		/* Fall through. */
 	case CFO_NEW_CONFF:
 		strcpy(cdr2rest, DPKGNEWEXT);
-		trig_path_activate(usenode, pkg);
+		trig_path_activate(usenode, pair.triggeree);
 		if (rename(cdr2.buf, cdr.buf))
 			ohshite(_("unable to install '%.250s' as '%.250s'"),
 			        cdr2.buf, cdr.buf);
@@ -563,7 +563,7 @@ deferred_configure_conffile(struct pkginfo *pkg, struct conffile *conff)
 	}
 
 	conff->hash = nfstrsave(newdisthash);
-	modstatdb_note(pkg);
+	modstatdb_note_pair(pair);
 
 	varbuf_destroy(&cdr);
 	varbuf_destroy(&cdr2);
@@ -575,28 +575,28 @@ deferred_configure_conffile(struct pkginfo *pkg, struct conffile *conff)
  * @param pkg The package to act on.
  */
 void
-deferred_configure(struct pkginfo *pkg)
+deferred_configure(struct pkginfo_pair pair)
 {
 	struct varbuf aemsgs = VARBUF_INIT;
 	struct conffile *conff;
 	struct pkginfo *otherpkg;
 	enum dep_check ok;
 
-	if (pkg->status == PKG_STAT_NOTINSTALLED)
+	if (pair.triggeree->status == PKG_STAT_NOTINSTALLED)
 		ohshit(_("no package named '%s' is installed, cannot configure"),
-		       pkg_name(pkg, pnaw_nonambig));
-	if (pkg->status == PKG_STAT_INSTALLED)
+		       pkg_name(pair.triggeree, pnaw_nonambig));
+	if (pair.triggeree->status == PKG_STAT_INSTALLED)
 		ohshit(_("package %.250s is already installed and configured"),
-		       pkg_name(pkg, pnaw_nonambig));
-	if (pkg->status != PKG_STAT_UNPACKED &&
-	    pkg->status != PKG_STAT_HALFCONFIGURED)
+		       pkg_name(pair.triggeree, pnaw_nonambig));
+	if (pair.triggeree->status != PKG_STAT_UNPACKED &&
+	    pair.triggeree->status != PKG_STAT_HALFCONFIGURED)
 		ohshit(_("package %.250s is not ready for configuration\n"
 		         " cannot configure (current status '%.250s')"),
-		       pkg_name(pkg, pnaw_nonambig),
-		       pkg_status_name(pkg));
+		       pkg_name(pair.triggeree, pnaw_nonambig),
+		       pkg_status_name(pair.triggeree));
 
-	for (otherpkg = &pkg->set->pkg; otherpkg; otherpkg = otherpkg->arch_next) {
-		if (otherpkg == pkg)
+	for (otherpkg = &pair.triggeree->set->pkg; otherpkg; otherpkg = otherpkg->arch_next) {
+		if (otherpkg == pair.triggeree)
 			continue;
 		if (otherpkg->status <= PKG_STAT_CONFIGFILES)
 			continue;
@@ -604,16 +604,16 @@ deferred_configure(struct pkginfo *pkg)
 		if (otherpkg->status < PKG_STAT_UNPACKED)
 			ohshit(_("package %s cannot be configured because "
 			         "%s is not ready (current status '%s')"),
-			       pkg_name(pkg, pnaw_always),
+			       pkg_name(pair.triggeree, pnaw_always),
 			       pkg_name(otherpkg, pnaw_always),
 			       pkg_status_name(otherpkg));
 
-		if (dpkg_version_compare(&pkg->installed.version,
+		if (dpkg_version_compare(&pair.triggeree->installed.version,
 		                         &otherpkg->installed.version))
 			ohshit(_("package %s %s cannot be configured because "
 			         "%s is at a different version (%s)"),
-			       pkg_name(pkg, pnaw_always),
-			       versiondescribe(&pkg->installed.version,
+			       pkg_name(pair.triggeree, pnaw_always),
+			       versiondescribe(&pair.triggeree->installed.version,
 			                       vdew_nonambig),
 			       pkg_name(otherpkg, pnaw_always),
 			       versiondescribe(&otherpkg->installed.version,
@@ -621,15 +621,15 @@ deferred_configure(struct pkginfo *pkg)
 	}
 
 	if (dependtry >= DEPEND_TRY_CYCLES)
-		if (findbreakcycle(pkg))
+		if (findbreakcycle(pair.triggeree))
 			sincenothing = 0;
 
-	ok = dependencies_ok(pkg, NULL, &aemsgs);
+	ok = dependencies_ok(pair.triggeree, NULL, &aemsgs);
 	if (ok == DEP_CHECK_DEFER) {
 		varbuf_destroy(&aemsgs);
-		ensure_package_clientdata(pkg);
-		pkg->clientdata->istobe = PKG_ISTOBE_INSTALLNEW;
-		enqueue_package(pkg);
+		ensure_package_clientdata(pair.triggeree);
+		pair.triggeree->clientdata->istobe = PKG_ISTOBE_INSTALLNEW;
+		enqueue_pair(pair);
 		return;
 	}
 
@@ -643,41 +643,41 @@ deferred_configure(struct pkginfo *pkg)
 	 * processing new packages can't enter into unpacked.
 	 */
 
-	ok = breakses_ok(pkg, &aemsgs) ? ok : DEP_CHECK_HALT;
+	ok = breakses_ok(pair.triggeree, &aemsgs) ? ok : DEP_CHECK_HALT;
 	if (ok == DEP_CHECK_HALT) {
 		sincenothing = 0;
 		varbuf_end_str(&aemsgs);
 		notice(_("dependency problems prevent configuration of %s:\n%s"),
-		       pkg_name(pkg, pnaw_nonambig), aemsgs.buf);
+		       pkg_name(pair.triggeree, pnaw_nonambig), aemsgs.buf);
 		varbuf_destroy(&aemsgs);
 		ohshit(_("dependency problems - leaving unconfigured"));
 	} else if (aemsgs.used) {
 		varbuf_end_str(&aemsgs);
 		notice(_("%s: dependency problems, but configuring anyway as you requested:\n%s"),
-		       pkg_name(pkg, pnaw_nonambig), aemsgs.buf);
+		       pkg_name(pair.triggeree, pnaw_nonambig), aemsgs.buf);
 	}
 	varbuf_destroy(&aemsgs);
 	sincenothing = 0;
 
-	if (pkg->eflag & PKG_EFLAG_REINSTREQ)
+	if (pair.triggeree->eflag & PKG_EFLAG_REINSTREQ)
 		forcibleerr(FORCE_REMOVE_REINSTREQ,
 		            _("package is in a very bad inconsistent state; you should\n"
 		              " reinstall it before attempting configuration"));
 
-	printf(_("Setting up %s (%s) ...\n"), pkg_name(pkg, pnaw_nonambig),
-	       versiondescribe(&pkg->installed.version, vdew_nonambig));
-	log_action("configure", pkg, &pkg->installed);
+	printf(_("Setting up %s (%s) ...\n"), pkg_name(pair.triggeree, pnaw_nonambig),
+	       versiondescribe(&pair.triggeree->installed.version, vdew_nonambig));
+	log_action("configure", pair.triggeree, &pair.triggeree->installed);
 
-	trig_activate_packageprocessing(pkg);
+	trig_activate_packageprocessing(pair.triggeree);
 
 	if (f_noact) {
-		pkg_set_status(pkg, PKG_STAT_INSTALLED);
-		ensure_package_clientdata(pkg);
-		pkg->clientdata->istobe = PKG_ISTOBE_NORMAL;
+		pkg_set_status(pair.triggeree, PKG_STAT_INSTALLED);
+		ensure_package_clientdata(pair.triggeree);
+		pair.triggeree->clientdata->istobe = PKG_ISTOBE_NORMAL;
 		return;
 	}
 
-	if (pkg->status == PKG_STAT_UNPACKED) {
+	if (pair.triggeree->status == PKG_STAT_UNPACKED) {
 		debug(dbg_general, "deferred_configure updating conffiles");
 		/* This will not do at all the right thing with overridden
 		 * conffiles or conffiles that are the ‘target’ of an override;
@@ -687,7 +687,7 @@ deferred_configure(struct pkginfo *pkg)
 		 *
 		 * Overriding conffiles is a silly thing to do anyway :-). */
 
-		modstatdb_note(pkg);
+		modstatdb_note_pair(pair);
 
 		/* On entry, the ‘new’ version of each conffile has been
 		 * unpacked as ‘*.dpkg-new’, and the ‘installed’ version is
@@ -695,30 +695,30 @@ deferred_configure(struct pkginfo *pkg)
 		 * version is in the conffiles data for the package. If
 		 * ‘*.dpkg-new’ no longer exists we assume that we've
 		 * already processed this one. */
-		for (conff = pkg->installed.conffiles; conff; conff = conff->next) {
+		for (conff = pair.triggeree->installed.conffiles; conff; conff = conff->next) {
 			if (conff->obsolete)
 				continue;
-			deferred_configure_conffile(pkg, conff);
+			deferred_configure_conffile(pair, conff);
 		}
 
-		pkg_set_status(pkg, PKG_STAT_HALFCONFIGURED);
+		pkg_set_status(pair.triggeree, PKG_STAT_HALFCONFIGURED);
 	}
 
-	if (pkg->status != PKG_STAT_HALFCONFIGURED)
+	if (pair.triggeree->status != PKG_STAT_HALFCONFIGURED)
 		internerr("package %s in state %s, instead of half-configured",
-		          pkg_name(pkg, pnaw_always), pkg_status_name(pkg));
+		          pkg_name(pair.triggeree, pnaw_always), pkg_status_name(pair.triggeree));
 
-	modstatdb_note(pkg);
+	modstatdb_note_pair(pair);
 
-	maintscript_postinst(pkg, "configure",
-	                     dpkg_version_is_informative(&pkg->configversion) ?
-	                     versiondescribe(&pkg->configversion,
+	maintscript_postinst_pair(pair, "configure",
+	                     dpkg_version_is_informative(&pair.triggeree->configversion) ?
+	                     versiondescribe(&pair.triggeree->configversion,
 	                                     vdew_nonambig) : "",
 	                     NULL);
 
-	pkg_reset_eflags(pkg);
-	pkg->trigpend_head = NULL;
-	post_postinst_tasks(pkg, PKG_STAT_INSTALLED);
+	pkg_reset_eflags(pair.triggeree);
+	pair.triggeree->trigpend_head = NULL;
+	post_postinst_tasks(pair, PKG_STAT_INSTALLED);
 }
 
 /**

@@ -49,7 +49,7 @@ pkg_files_blank(struct pkginfo *pkg)
 		for (pkg_node = current->namenode->packages;
 		     pkg_node;
 		     pkg_node = pkg_node->next) {
-			if (pkg_node->pkg == pkg) {
+			if (pkg_node->pair.triggeree == pkg) {
 				*pkg_prev = pkg_node->next;
 
 				/* The actual filelist links were allocated
@@ -86,7 +86,7 @@ pkg_files_add_file(struct pkginfo *pkg, struct fsys_namenode *namenode,
 
 	/* Add pkg to newent's package list. */
 	pkg_node = nfmalloc(sizeof(*pkg_node));
-	pkg_node->pkg = pkg;
+	pkg_node->pair = (struct pkginfo_pair) {pkg, pkg, __func__};
 	pkg_node->next = newent->namenode->packages;
 	newent->namenode->packages = pkg_node;
 

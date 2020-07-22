@@ -114,13 +114,14 @@ void cu_installnew(int argc, void **argv) {
 
 void cu_prermupgrade(int argc, void **argv) {
   struct pkginfo *pkg= (struct pkginfo*)argv[0];
+  struct pkginfo_pair pair = {pkg, pkg, __func__};
 
   if (cleanup_pkg_failed++) return;
-  maintscript_postinst(pkg, "abort-upgrade",
+  maintscript_postinst_pair(pair, "abort-upgrade",
                        versiondescribe(&pkg->available.version, vdew_nonambig),
                        NULL);
   pkg_clear_eflags(pkg, PKG_EFLAG_REINSTREQ);
-  post_postinst_tasks(pkg, PKG_STAT_INSTALLED);
+  post_postinst_tasks(pair, PKG_STAT_INSTALLED);
   cleanup_pkg_failed--;
 }
 
@@ -132,7 +133,7 @@ void ok_prermdeconfigure(int argc, void **argv) {
   struct pkginfo *deconf= (struct pkginfo*)argv[0];
 
   if (cipaction->arg_int == act_install)
-    enqueue_package(deconf);
+    enqueue_pair((struct pkginfo_pair) {deconf, deconf, __func__});
 }
 
 /*
@@ -143,8 +144,10 @@ void cu_prermdeconfigure(int argc, void **argv) {
   struct pkginfo *conflictor = (struct pkginfo *)argv[1];
   struct pkginfo *infavour= (struct pkginfo*)argv[2];
 
+  struct pkginfo_pair deconf_pair = {deconf, deconf, __func__};
+
   if (conflictor) {
-    maintscript_postinst(deconf, "abort-deconfigure",
+    maintscript_postinst_pair(deconf_pair, "abort-deconfigure",
                          "in-favour",
                          pkgbin_name(infavour, &infavour->available,
                                      pnaw_nonambig),
@@ -156,7 +159,7 @@ void cu_prermdeconfigure(int argc, void **argv) {
                                          vdew_nonambig),
                          NULL);
   } else {
-    maintscript_postinst(deconf, "abort-deconfigure",
+    maintscript_postinst_pair(deconf_pair, "abort-deconfigure",
                          "in-favour",
                          pkgbin_name(infavour, &infavour->available,
                                      pnaw_nonambig),
@@ -165,15 +168,16 @@ void cu_prermdeconfigure(int argc, void **argv) {
                          NULL);
   }
 
-  post_postinst_tasks(deconf, PKG_STAT_INSTALLED);
+  post_postinst_tasks(deconf_pair, PKG_STAT_INSTALLED);
 }
 
 void cu_prerminfavour(int argc, void **argv) {
   struct pkginfo *conflictor= (struct pkginfo*)argv[0];
   struct pkginfo *infavour= (struct pkginfo*)argv[1];
+  struct pkginfo_pair conflictor_pair = {conflictor, conflictor, __func__};
 
   if (cleanup_conflictor_failed++) return;
-  maintscript_postinst(conflictor, "abort-remove",
+  maintscript_postinst_pair(conflictor_pair, "abort-remove",
                        "in-favour",
                        pkgbin_name(infavour, &infavour->available,
                                    pnaw_nonambig),
@@ -181,22 +185,23 @@ void cu_prerminfavour(int argc, void **argv) {
                                        vdew_nonambig),
                        NULL);
   pkg_clear_eflags(conflictor, PKG_EFLAG_REINSTREQ);
-  post_postinst_tasks(conflictor, PKG_STAT_INSTALLED);
+  post_postinst_tasks(conflictor_pair, PKG_STAT_INSTALLED);
   cleanup_conflictor_failed--;
 }
 
 void cu_preinstverynew(int argc, void **argv) {
   struct pkginfo *pkg= (struct pkginfo*)argv[0];
+  struct pkginfo_pair pair = {pkg, pkg, __func__};
   char *cidir= (char*)argv[1];
   char *cidirrest= (char*)argv[2];
 
   if (cleanup_pkg_failed++) return;
-  maintscript_new(pkg, POSTRMFILE, "post-removal", cidir, cidirrest,
+  maintscript_new_pair(pair, POSTRMFILE, "post-removal", cidir, cidirrest,
                   "abort-install", NULL);
   pkg_set_status(pkg, PKG_STAT_NOTINSTALLED);
   pkg_clear_eflags(pkg, PKG_EFLAG_REINSTREQ);
   pkgbin_blank(&pkg->installed);
-  modstatdb_note(pkg);
+  modstatdb_note_pair(pair);
   cleanup_pkg_failed--;
 }
 
@@ -204,34 +209,36 @@ void cu_preinstnew(int argc, void **argv) {
   struct pkginfo *pkg= (struct pkginfo*)argv[0];
   char *cidir= (char*)argv[1];
   char *cidirrest= (char*)argv[2];
+  struct pkginfo_pair pair = {pkg, pkg, __func__};
 
   if (cleanup_pkg_failed++) return;
-  maintscript_new(pkg, POSTRMFILE, "post-removal", cidir, cidirrest,
+  maintscript_new_pair(pair, POSTRMFILE, "post-removal", cidir, cidirrest,
                   "abort-install",
                   versiondescribe(&pkg->installed.version, vdew_nonambig),
                   versiondescribe(&pkg->available.version, vdew_nonambig),
                   NULL);
   pkg_set_status(pkg, PKG_STAT_CONFIGFILES);
   pkg_clear_eflags(pkg, PKG_EFLAG_REINSTREQ);
-  modstatdb_note(pkg);
+  modstatdb_note_pair(pair);
   cleanup_pkg_failed--;
 }
 
 void cu_preinstupgrade(int argc, void **argv) {
   struct pkginfo *pkg= (struct pkginfo*)argv[0];
+  struct pkginfo_pair pair = {pkg, pkg, __func__};
   char *cidir= (char*)argv[1];
   char *cidirrest= (char*)argv[2];
   enum pkgstatus *oldstatusp= (enum pkgstatus*)argv[3];
 
   if (cleanup_pkg_failed++) return;
-  maintscript_new(pkg, POSTRMFILE, "post-removal", cidir, cidirrest,
+  maintscript_new_pair(pair, POSTRMFILE, "post-removal", cidir, cidirrest,
                   "abort-upgrade",
                   versiondescribe(&pkg->installed.version, vdew_nonambig),
                   versiondescribe(&pkg->available.version, vdew_nonambig),
                   NULL);
   pkg_set_status(pkg, *oldstatusp);
   pkg_clear_eflags(pkg, PKG_EFLAG_REINSTREQ);
-  modstatdb_note(pkg);
+  modstatdb_note_pair(pair);
   cleanup_pkg_failed--;
 }
 
@@ -239,7 +246,7 @@ void cu_postrmupgrade(int argc, void **argv) {
   struct pkginfo *pkg= (struct pkginfo*)argv[0];
 
   if (cleanup_pkg_failed++) return;
-  maintscript_installed(pkg, PREINSTFILE, "pre-installation",
+  maintscript_installed_pair((struct pkginfo_pair) {pkg, pkg, __func__}, PREINSTFILE, "pre-installation",
                         "abort-upgrade",
                         versiondescribe(&pkg->available.version, vdew_nonambig),
                         NULL);
@@ -250,9 +257,11 @@ void cu_prermremove(int argc, void **argv) {
   struct pkginfo *pkg= (struct pkginfo*)argv[0];
   enum pkgstatus *oldpkgstatus= (enum pkgstatus*)argv[1];
 
+  struct pkginfo_pair pair = {pkg, pkg, __func__};
+
   if (cleanup_pkg_failed++) return;
-  maintscript_postinst(pkg, "abort-remove", NULL);
+  maintscript_postinst_pair(pair, "abort-remove", NULL);
   pkg_clear_eflags(pkg, PKG_EFLAG_REINSTREQ);
-  post_postinst_tasks(pkg, *oldpkgstatus);
+  post_postinst_tasks(pair, *oldpkgstatus);
   cleanup_pkg_failed--;
 }

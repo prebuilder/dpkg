@@ -862,7 +862,7 @@ main(int argc, const char * const *argv)
 	if (!cipaction)
 		setaction(&cmdinfo_add, NULL);
 
-	modstatdb_open(msdbrw_readonly);
+	modstatdb_open(msdbrw_readonly, NULL);
 	ensure_diversions();
 
 	ret = cipaction->action(argv);

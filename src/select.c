@@ -65,7 +65,7 @@ getselections(const char *const *argv)
   const char *thisarg;
   int i, found;
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   pkg_array_init_from_hash(&array);
   pkg_array_sort(&array, pkg_sorter_by_nonambig_name_arch);
@@ -128,7 +128,7 @@ setselections(const char *const *argv)
   else
     msdbflags |= msdbrw_write;
 
-  modstatdb_open(msdbflags);
+  modstatdb_open(msdbflags, NULL);
   pkg_infodb_upgrade();
 
   lno= 1;
@@ -223,7 +223,7 @@ clearselections(const char *const *argv)
   else
     msdbflags = msdbrw_write;
 
-  modstatdb_open(msdbflags);
+  modstatdb_open(msdbflags, NULL);
   pkg_infodb_upgrade();
 
   iter = pkg_hash_iter_new();

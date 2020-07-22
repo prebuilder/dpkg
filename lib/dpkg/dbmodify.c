@@ -282,7 +282,7 @@ modstatdb_unlock(void)
 }
 
 enum modstatdb_rw
-modstatdb_open(enum modstatdb_rw readwritereq)
+modstatdb_open(enum modstatdb_rw readwritereq, struct pkginfo *triggerer)
 {
   bool db_can_access = false;
 
@@ -346,7 +346,7 @@ modstatdb_open(enum modstatdb_rw readwritereq)
   }
 
   trig_fixup_awaiters(cstatus);
-  trig_incorporate(cstatus);
+  trig_incorporate(cstatus, triggerer);
 
   return cstatus;
 }
@@ -459,52 +459,56 @@ modstatdb_note_core(struct pkginfo *pkg)
  * will be adjusted.
  */
 void modstatdb_note(struct pkginfo *pkg) {
+	modstatdb_note_pair((struct pkginfo_pair) {pkg, pkg, __func__});
+}
+
+void modstatdb_note_pair(struct pkginfo_pair pair) {
   struct trigaw *ta;
 
   onerr_abort++;
 
   /* Clear pending triggers here so that only code that sets the status
    * to interesting (for triggers) values has to care about triggers. */
-  if (pkg->status != PKG_STAT_TRIGGERSPENDING &&
-      pkg->status != PKG_STAT_TRIGGERSAWAITED)
-    pkg->trigpend_head = NULL;
+  if (pair.triggeree->status != PKG_STAT_TRIGGERSPENDING &&
+      pair.triggeree->status != PKG_STAT_TRIGGERSAWAITED)
+    pair.triggeree->trigpend_head = NULL;
 
-  if (pkg->status <= PKG_STAT_CONFIGFILES) {
-    for (ta = pkg->trigaw.head; ta; ta = ta->sameaw.next)
+  if (pair.triggeree->status <= PKG_STAT_CONFIGFILES) {
+    for (ta = pair.triggeree->trigaw.head; ta; ta = ta->sameaw.next)
       ta->aw = NULL;
-    pkg->trigaw.head = pkg->trigaw.tail = NULL;
+    pair.triggeree->trigaw.head = pair.triggeree->trigaw.tail = NULL;
   }
 
-  if (pkg->status_dirty) {
-    log_message("status %s %s %s", pkg_status_name(pkg),
-                pkg_name(pkg, pnaw_always),
-                versiondescribe_c(&pkg->installed.version, vdew_nonambig));
-    statusfd_send("status: %s: %s", pkg_name(pkg, pnaw_nonambig),
-                  pkg_status_name(pkg));
+  if (pair.triggeree->status_dirty) {
+    log_message("status %s %s %s", pkg_status_name(pair.triggeree),
+                pkg_name(pair.triggeree, pnaw_always),
+                versiondescribe_c(&pair.triggeree->installed.version, vdew_nonambig));
+    statusfd_send("status: %s: %s", pkg_name(pair.triggeree, pnaw_nonambig),
+                  pkg_status_name(pair.triggeree));
 
-    pkg->status_dirty = false;
+    pair.triggeree->status_dirty = false;
   }
 
   if (cstatus >= msdbrw_write)
-    modstatdb_note_core(pkg);
+    modstatdb_note_core(pair.triggeree);
 
-  if (!pkg->trigpend_head && pkg->othertrigaw_head) {
+  if (!pair.triggeree->trigpend_head && pair.triggeree->othertrigaw_head) {
     /* Automatically remove us from other packages' Triggers-Awaited.
      * We do this last because we want to maximize our chances of
      * successfully recording the status of the package we were
      * pointed at by our caller, although there is some risk of
      * leaving us in a slightly odd situation which is cleared up
      * by the trigger handling logic in deppossi_ok_found. */
-    trig_clear_awaiters(pkg);
+    trig_clear_awaiters(pair);
   }
 
   onerr_abort--;
 }
 
 void
-modstatdb_note_ifwrite(struct pkginfo *pkg)
+modstatdb_note_ifwrite(struct pkginfo_pair pair)
 {
   if (cstatus >= msdbrw_write)
-    modstatdb_note(pkg);
+    modstatdb_note_pair(pair);
 }
 

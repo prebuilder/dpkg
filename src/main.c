@@ -314,10 +314,9 @@ set_ignore_depends(const struct cmdinfo *cip, const char *value)
   }
   p= copy;
   while (*p) {
-    struct pkginfo *pkg;
+    struct pkginfo *pkg = dpkg_options_parse_pkgname(cip, p);
 
-    pkg = dpkg_options_parse_pkgname(cip, p);
-    pkg_list_prepend(&ignoredependss, pkg);
+    pkg_list_prepend(&ignoredependss, (struct pkginfo_pair) {pkg, pkg, __func__});
 
     p+= strlen(p)+1;
   }
@@ -496,7 +495,7 @@ arch_remove(const char *const *argv)
   if (archname == NULL || *argv)
     badusage(_("--%s takes exactly one argument"), cipaction->olong);
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   arch = dpkg_arch_find(archname);
   if (arch->type != DPKG_ARCH_FOREIGN) {

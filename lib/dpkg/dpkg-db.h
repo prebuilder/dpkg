@@ -239,6 +239,15 @@ struct pkginfo {
   bool status_dirty;
 };
 
+struct pkginfo_pair{
+	struct pkginfo *triggeree;
+	struct pkginfo *triggerer;
+	char *source;
+	char *traceback;
+};
+
+extern struct pkginfo_pair EMPTY_PAIR;
+
 /**
  * Node describing a package set sharing the same package name.
  */
@@ -283,10 +292,11 @@ bool modstatdb_is_locked(void);
 bool modstatdb_can_lock(void);
 void modstatdb_lock(void);
 void modstatdb_unlock(void);
-enum modstatdb_rw modstatdb_open(enum modstatdb_rw reqrwflags);
+enum modstatdb_rw modstatdb_open(enum modstatdb_rw reqrwflags, struct pkginfo *triggerer);
 enum modstatdb_rw modstatdb_get_status(void);
 void modstatdb_note(struct pkginfo *pkg);
-void modstatdb_note_ifwrite(struct pkginfo *pkg);
+void modstatdb_note_pair(struct pkginfo_pair pair);
+void modstatdb_note_ifwrite(struct pkginfo_pair pair);
 void modstatdb_checkpoint(void);
 void modstatdb_shutdown(void);
 

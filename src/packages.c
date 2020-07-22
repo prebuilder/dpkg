@@ -53,19 +53,19 @@ enum dependtry dependtry = DEPEND_TRY_NORMAL;
 int sincenothing = 0;
 
 void
-enqueue_package(struct pkginfo *pkg)
+enqueue_pair(struct pkginfo_pair pair)
 {
-  ensure_package_clientdata(pkg);
-  if (pkg->clientdata->enqueued)
+  ensure_package_clientdata(pair.triggeree);
+  if (pair.triggeree->clientdata->enqueued)
     return;
-  pkg->clientdata->enqueued = true;
-  pkg_queue_push(&queue, pkg);
+  pair.triggeree->clientdata->enqueued = true;
+  pkg_queue_push(&queue, pair);
 }
 
 void
-enqueue_package_mark_seen(struct pkginfo *pkg)
+enqueue_package_mark_seen(struct pkginfo *pkg, char * func)
 {
-  enqueue_package(pkg);
+  enqueue_pair((struct pkginfo_pair) {pkg, pkg, func});
   pkg->clientdata->cmdline_seen++;
 }
 
@@ -108,7 +108,7 @@ enqueue_pending(void)
     default:
       internerr("unknown action '%d'", cipaction->arg_int);
     }
-    enqueue_package(pkg);
+    enqueue_pair((struct pkginfo_pair) {pkg, pkg, __func__});
   }
   pkg_hash_iter_free(iter);
 }
@@ -127,11 +127,11 @@ enqueue_specified(const char *const *argv)
       badusage(_("you must specify packages by their own names, "
                  "not by quoting the names of the files they come in"));
     }
-    enqueue_package_mark_seen(pkg);
+    enqueue_package_mark_seen(pkg, __func__);
   }
 
   if (cipaction->arg_int == act_configure)
-    trigproc_populate_deferred();
+    trigproc_populate_deferred(NULL);
 }
 
 int
@@ -141,7 +141,7 @@ packages(const char *const *argv)
 
   modstatdb_open(f_noact ?                  msdbrw_readonly :
                  in_force(FORCE_NON_ROOT) ? msdbrw_write :
-                                            msdbrw_needsuperuser);
+                                            msdbrw_needsuperuser, NULL);
   checkpath();
   pkg_infodb_upgrade();
 
@@ -171,10 +171,12 @@ packages(const char *const *argv)
 
 void process_queue(void) {
   struct pkg_list *rundown;
-  struct pkginfo *volatile pkg;
+  struct pkginfo_pair volatile pair;
   volatile enum action action_todo;
   jmp_buf ejbuf;
   enum pkg_istobe istobe = PKG_ISTOBE_NORMAL;
+
+  pair.source = __func__;
 
   if (abort_processing)
     return;
@@ -195,36 +197,36 @@ void process_queue(void) {
     internerr("unknown action '%d'", cipaction->arg_int);
   }
   for (rundown = queue.head; rundown; rundown = rundown->next) {
-    ensure_package_clientdata(rundown->pkg);
+    ensure_package_clientdata(rundown->pair.triggeree);
 
     /* We have processed this package more than once. There are no duplicates
      * as we make sure of that when enqueuing them. */
-    if (rundown->pkg->clientdata->cmdline_seen > 1) {
+    if (rundown->pair.triggeree->clientdata->cmdline_seen > 1) {
       switch (cipaction->arg_int) {
       case act_triggers:
       case act_configure: case act_remove: case act_purge:
         printf(_("Package %s listed more than once, only processing once.\n"),
-               pkg_name(rundown->pkg, pnaw_nonambig));
+               pkg_name(rundown->pair.triggeree, pnaw_nonambig));
         break;
       case act_install:
         printf(_("More than one copy of package %s has been unpacked\n"
                " in this run !  Only configuring it once.\n"),
-               pkg_name(rundown->pkg, pnaw_nonambig));
+               pkg_name(rundown->pair.triggeree, pnaw_nonambig));
         break;
       default:
         internerr("unknown action '%d'", cipaction->arg_int);
       }
     }
-    rundown->pkg->clientdata->istobe = istobe;
+    rundown->pair.triggeree->clientdata->istobe = istobe;
   }
 
   while (!pkg_queue_is_empty(&queue)) {
-    pkg = pkg_queue_pop(&queue);
-    if (!pkg)
+    pair = pkg_queue_pop(&queue);
+    if (!pair.triggeree)
       continue; /* Duplicate, which we removed earlier. */
 
-    ensure_package_clientdata(pkg);
-    pkg->clientdata->enqueued = false;
+    ensure_package_clientdata(pair.triggeree);
+    pair.triggeree->clientdata->enqueued = false;
 
     action_todo = cipaction->arg_int;
 
@@ -240,8 +242,8 @@ void process_queue(void) {
     } else if (sincenothing > queue.length * 2 + 2) {
       if (dependtry >= DEPEND_TRY_TRIGGERS &&
           progress_bytrigproc && progress_bytrigproc->trigpend_head) {
-        enqueue_package(pkg);
-        pkg = progress_bytrigproc;
+        enqueue_pair(pair);
+        pair.triggeree = progress_bytrigproc;
         progress_bytrigproc = NULL;
         action_todo = act_configure;
       } else {
@@ -254,16 +256,16 @@ void process_queue(void) {
     }
 
     debug(dbg_general, "process queue pkg %s queue.len %d progress %d, try %d",
-          pkg_name(pkg, pnaw_always), queue.length, sincenothing, dependtry);
+          pkg_name(pair.triggeree, pnaw_always), queue.length, sincenothing, dependtry);
 
-    if (pkg->status > PKG_STAT_INSTALLED)
+    if (pair.triggeree->status > PKG_STAT_INSTALLED)
       internerr("package %s status %d is out-of-bounds",
-                pkg_name(pkg, pnaw_always), pkg->status);
+                pkg_name(pair.triggeree, pnaw_always), pair.triggeree->status);
 
     if (setjmp(ejbuf)) {
       /* Give up on it from the point of view of other packages, i.e. reset
        * istobe. */
-      pkg->clientdata->istobe = PKG_ISTOBE_NORMAL;
+      pair.triggeree->clientdata->istobe = PKG_ISTOBE_NORMAL;
 
       pop_error_context(ehflag_bombout);
       if (abort_processing)
@@ -271,29 +273,29 @@ void process_queue(void) {
       continue;
     }
     push_error_context_jump(&ejbuf, print_error_perpackage,
-                            pkg_name(pkg, pnaw_nonambig));
+                            pkg_name(pair.triggeree, pnaw_nonambig));
 
     switch (action_todo) {
     case act_triggers:
-      if (!pkg->trigpend_head)
+      if (!pair.triggeree->trigpend_head)
         ohshit(_("package %.250s is not ready for trigger processing\n"
                  " (current status '%.250s' with no pending triggers)"),
-               pkg_name(pkg, pnaw_nonambig), pkg_status_name(pkg));
+               pkg_name(pair.triggeree, pnaw_nonambig), pkg_status_name(pair.triggeree));
       /* Fall through. */
     case act_install:
       /* Don't try to configure pkgs that we've just disappeared. */
-      if (pkg->status == PKG_STAT_NOTINSTALLED)
+      if (pair.triggeree->status == PKG_STAT_NOTINSTALLED)
         break;
       /* Fall through. */
     case act_configure:
       /* Do whatever is most needed. */
-      if (pkg->trigpend_head)
-        trigproc(pkg, TRIGPROC_TRY_QUEUED);
+      if (pair.triggeree->trigpend_head)
+        trigproc(pair, TRIGPROC_TRY_QUEUED);
       else
-        deferred_configure(pkg);
+        deferred_configure(pair);
       break;
     case act_remove: case act_purge:
-      deferred_remove(pkg);
+      deferred_remove(pair);
       break;
     default:
       internerr("unknown action '%d'", cipaction->arg_int);
@@ -492,7 +494,7 @@ deppossi_ok_found(struct pkginfo *possdependee, struct pkginfo *requiredby,
       notice(_("also configuring '%s' (required by '%s')"),
              pkg_name(possdependee, pnaw_nonambig),
              pkg_name(requiredby, pnaw_nonambig));
-      enqueue_package(possdependee);
+      enqueue_pair((struct pkginfo_pair) {possdependee, possdependee, __func__});
       sincenothing = 0;
       return FOUND_DEFER;
     } else {

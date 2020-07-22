@@ -54,8 +54,8 @@ void pkg_queue_destroy(struct pkg_queue *queue);
 
 int pkg_queue_is_empty(struct pkg_queue *queue);
 
-struct pkg_list *pkg_queue_push(struct pkg_queue *queue, struct pkginfo *pkg);
-struct pkginfo *pkg_queue_pop(struct pkg_queue *queue);
+struct pkg_list *pkg_queue_push(struct pkg_queue *queue, struct pkginfo_pair pair);
+struct pkginfo_pair pkg_queue_pop(struct pkg_queue *queue);
 
 /** @} */
 

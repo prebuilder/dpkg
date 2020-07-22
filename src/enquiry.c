@@ -195,7 +195,7 @@ audit(const char *const *argv)
   bool head_running = false;
   int i;
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   if (!*argv)
     pkg_array_init_from_hash(&array);
@@ -282,7 +282,7 @@ unpackchk(const char *const *argv)
   if (*argv)
     badusage(_("--%s takes no arguments"), cipaction->olong);
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   totalcount= 0;
   sectionentries = NULL;
@@ -367,7 +367,7 @@ assert_version_support(const char *const *argv,
   if (*argv)
     badusage(_("--%s takes no arguments"), cipaction->olong);
 
-  modstatdb_open(msdbrw_readonly);
+  modstatdb_open(msdbrw_readonly, NULL);
 
   pkg = pkg_hash_find_singleton("dpkg");
   switch (pkg->status) {
@@ -474,7 +474,7 @@ predeppackage(const char *const *argv)
   if (*argv)
     badusage(_("--%s takes no arguments"), cipaction->olong);
 
-  modstatdb_open(msdbrw_readonly | msdbrw_available_readonly);
+  modstatdb_open(msdbrw_readonly | msdbrw_available_readonly, NULL);
   /* We use clientdata->istobe to detect loops. */
   clear_istobes();
 

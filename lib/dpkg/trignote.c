@@ -104,12 +104,12 @@ trig_note_aw(struct pkginfo *pend, struct pkginfo *aw)
 static struct pkg_list *trig_awaited_pend_head;
 
 void
-trig_awaited_pend_enqueue(struct pkginfo *pend)
+trig_awaited_pend_enqueue(struct pkginfo_pair pend)
 {
 	struct pkg_list *tp;
 
 	for (tp = trig_awaited_pend_head; tp; tp = tp->next)
-		if (tp->pkg == pend)
+		if (tp->pair.triggeree == pend.triggeree)
 			return;
 
 	pkg_list_prepend(&trig_awaited_pend_head, pend);
@@ -121,8 +121,8 @@ trig_awaited_pend_foreach(trig_awaited_pend_foreach_func *func)
 	struct pkg_list *tp;
 
 	for (tp = trig_awaited_pend_head; tp; tp = tp->next)
-		if (!tp->pkg->trigpend_head)
-			func(tp->pkg);
+		if (!tp->pair.triggeree->trigpend_head)
+			func(tp->pair);
 }
 
 void

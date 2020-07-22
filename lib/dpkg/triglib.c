@@ -41,6 +41,10 @@
 #include <dpkg/trigdeferred.h>
 #include <dpkg/triglib.h>
 
+struct pkginfo_pair EMPTY_PAIR = {
+	NULL, NULL, "<EMPTY>"
+};
+
 /*========== Recording triggers. ==========*/
 
 static char *triggersdir, *triggersfilefile;
@@ -78,37 +82,37 @@ static struct trig_hooks trigh;
  * trig is not copied!
  */
 static void
-trig_record_activation(struct pkginfo *pend, struct pkginfo *aw, const char *trig)
+trig_record_activation(struct pkginfo_pair pend_pair, struct pkginfo *aw, const char *trig)
 {
-	if (pend->status < PKG_STAT_TRIGGERSAWAITED)
+	if (pend_pair.triggeree->status < PKG_STAT_TRIGGERSAWAITED)
 		return; /* Not interested then. */
 
-	if (trig_note_pend(pend, trig))
-		modstatdb_note_ifwrite(pend);
+	if (trig_note_pend(pend_pair.triggeree, trig))
+		modstatdb_note_ifwrite(pend_pair);
 
 	if (trigh.enqueue_deferred)
-		trigh.enqueue_deferred(pend);
+		trigh.enqueue_deferred(pend_pair);
 
-	if (aw && pend->status > PKG_STAT_CONFIGFILES)
-		if (trig_note_aw(pend, aw)) {
+	if (aw && pend_pair.triggeree->status > PKG_STAT_CONFIGFILES)
+		if (trig_note_aw(pend_pair.triggeree, aw)) {
 			if (aw->status > PKG_STAT_TRIGGERSAWAITED)
 				pkg_set_status(aw, PKG_STAT_TRIGGERSAWAITED);
-			modstatdb_note_ifwrite(aw);
+			modstatdb_note_ifwrite((struct pkginfo_pair) {aw, pend_pair.triggerer, __func__});
 		}
 }
 
 void
-trig_clear_awaiters(struct pkginfo *notpend)
+trig_clear_awaiters(struct pkginfo_pair notpend)
 {
 	struct trigaw *ta;
 	struct pkginfo *aw;
 
-	if (notpend->trigpend_head)
+	if (notpend.triggeree->trigpend_head)
 		internerr("package %s has pending triggers",
-		          pkg_name(notpend, pnaw_always));
+		          pkg_name(notpend.triggeree, pnaw_always));
 
-	ta = notpend->othertrigaw_head;
-	notpend->othertrigaw_head = NULL;
+	ta = notpend.triggeree->othertrigaw_head;
+	notpend.triggeree->othertrigaw_head = NULL;
 	for (; ta; ta = ta->samepend_next) {
 		aw = ta->aw;
 		if (!aw)
@@ -119,7 +123,7 @@ trig_clear_awaiters(struct pkginfo *notpend)
 				pkg_set_status(aw, PKG_STAT_TRIGGERSPENDING);
 			else
 				pkg_set_status(aw, PKG_STAT_INSTALLED);
-			modstatdb_note(aw);
+			modstatdb_note_pair((struct pkginfo_pair) {aw, notpend.triggerer, __func__});
 		}
 	}
 }
@@ -152,7 +156,7 @@ struct trigkindinfo {
 	/* Rest are for everyone: */
 	void (*activate_awaiter)(struct pkginfo *pkg /* may be NULL */);
 	void (*activate_done)(void);
-	void (*interest_change)(const char *name, struct pkginfo *pkg,
+	void (*interest_change)(const char *name, struct pkginfo_pair pair,
 	                        struct pkgbin *pkgbin,
 	                        int signum, enum trig_options opts);
 };
@@ -283,10 +287,12 @@ trk_explicit_activate_start(void)
 }
 
 static void
-trk_explicit_activate_awaiter(struct pkginfo *aw)
+trk_explicit_activate_awaiter(struct pkginfo_pair aw_pair)
 {
 	char buf[1024];
-	struct pkginfo *pend;
+	struct pkginfo_pair pend_pair;
+	pend_pair.triggerer = aw_pair.triggerer;
+	pend_pair.source = __func__;
 
 	if (!trk_explicit_f)
 		return;
@@ -309,13 +315,13 @@ trk_explicit_activate_awaiter(struct pkginfo *aw)
 			*slash = '\0';
 		}
 
-		pend = pkg_spec_parse_pkg(buf, &err);
-		if (pend == NULL)
+		pend_pair.triggeree = pkg_spec_parse_pkg(buf, &err);
+		if (pend_pair.triggeree == NULL)
 			ohshit(_("trigger interest file '%.250s' syntax error; "
 			         "illegal package name '%.250s': %.250s"),
 			       trk_explicit_fn.buf, buf, err.str);
 
-		trig_record_activation(pend, noawait ? NULL : aw,
+		trig_record_activation(pend_pair, noawait ? NULL : aw_pair.triggeree,
 		                       trk_explicit_trig);
 	}
 }
@@ -392,7 +398,7 @@ static int filetriggers_edited = -1;
  * but die if already present.
  */
 static void
-trk_file_interest_change(const char *trig, struct pkginfo *pkg,
+trk_file_interest_change(const char *trig, struct pkginfo_pair pair,
                          struct pkgbin *pkgbin, int signum,
                          enum trig_options opts)
 {
@@ -404,14 +410,14 @@ trk_file_interest_change(const char *trig, struct pkginfo *pkg,
 		if (signum >= 0)
 			internerr("lost filename node '%s' for package %s "
 			          "triggered to add", trig,
-			          pkgbin_name(pkg, pkgbin, pnaw_always));
+			          pkgbin_name(pair.triggeree, pkgbin, pnaw_always));
 		return;
 	}
 
 	for (search = trigh.namenode_interested(fnn);
 	     (tfi = *search);
 	     search = &tfi->samefile_next)
-		if (tfi->pkg == pkg)
+		if (tfi->pair.triggeree == pair.triggeree)
 			goto found;
 
 	/* Not found. */
@@ -419,12 +425,14 @@ trk_file_interest_change(const char *trig, struct pkginfo *pkg,
 		return;
 
 	tfi = nfmalloc(sizeof(*tfi));
-	tfi->pkg = pkg;
+	tfi->pair = pair;
 	tfi->pkgbin = pkgbin;
 	tfi->fnn = fnn;
 	tfi->options = opts;
 	tfi->samefile_next = *trigh.namenode_interested(fnn);
 	*trigh.namenode_interested(fnn) = tfi;
+
+	printf("inserting trigger for %s into queue\n", pkgbin_name(tfi->pair.triggeree, tfi->pkgbin, pnaw_nonambig));
 
 	LIST_LINK_TAIL_PART(filetriggers, tfi, inoverall);
 	goto edited;
@@ -434,7 +442,7 @@ found:
 	if (signum > 1)
 		ohshit(_("duplicate file trigger interest for filename '%.250s' "
 		         "and package '%.250s'"), trig,
-		       pkgbin_name(pkg, pkgbin, pnaw_nonambig));
+		       pkgbin_name(pair.triggeree, pkgbin, pnaw_nonambig));
 	if (signum > 0)
 		return;
 
@@ -461,11 +469,11 @@ trig_file_interests_update(void)
 	file = atomic_file_new(triggersfilefile, 0);
 	atomic_file_open(file);
 
-	for (tfi = filetriggers.head; tfi; tfi = tfi->inoverall.next)
+	for (tfi = filetriggers.head; tfi; tfi = tfi->inoverall.next){
 		fprintf(file->fp, "%s %s%s\n", trigh.namenode_name(tfi->fnn),
-		        pkgbin_name(tfi->pkg, tfi->pkgbin, pnaw_nonambig),
+		        pkgbin_name(tfi->pair.triggeree, tfi->pkgbin, pnaw_nonambig),
 		        (tfi->options == TRIG_NOAWAIT) ? "/noawait" : "");
-
+	}
 	atomic_file_sync(file);
 	atomic_file_close(file);
 	atomic_file_commit(file);
@@ -473,7 +481,7 @@ trig_file_interests_update(void)
 }
 
 void
-trig_file_interests_save(void)
+trig_file_interests_save(struct pkginfo *triggerer)
 {
 	if (filetriggers_edited <= 0)
 		return;
@@ -488,13 +496,55 @@ trig_file_interests_save(void)
 	filetriggers_edited = 0;
 }
 
+
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
+char * generateTracebackStr(){
+	int j = 0;
+	char *tracebackBuff = malloc(4 * 4096);
+	memset(tracebackBuff, 0, 4 * 4096);
+	char *tracebackCurPtr = tracebackBuff;
+	char procName[100];
+
+
+	unw_cursor_t cursor; unw_context_t uc;
+	unw_word_t offst;
+
+	unw_getcontext(&uc);
+	unw_init_local(&cursor, &uc);
+	for (j=0;unw_step(&cursor) > 0;++j) {
+		unw_get_proc_name(&cursor, procName, 100, &offst);
+		tracebackCurPtr += sprintf(tracebackCurPtr, "%d %lx %s\n", j, offst, procName);
+	}
+	return tracebackBuff;
+}
+
+
 void
-trig_file_interests_ensure(void)
+trig_file_interests_ensure(struct pkginfo *triggerer)
 {
 	FILE *f;
 	char linebuf[1024], *space;
-	struct pkginfo *pkg;
+	struct pkginfo_pair pair;
 	struct pkgbin *pkgbin;
+
+	if(triggerer == NULL){
+		fprintf(stderr, "Triggerer is NULL\n");
+	}
+	else{
+		fprintf(stderr, "Triggerer is %s\n", pkgbin_name(triggerer, &triggerer->available, pnaw_nonambig));
+	}
+
+	pair.source = __func__;
+	pair.traceback = generateTracebackStr();
+
+	/*0 97 trig_file_interests_ensure
+	1 77 trig_incorporate
+	2 2ca modstatdb_open
+	3 a3 archivefiles
+	4 270 main
+	5 f3 __libc_start_main
+	6 2e _start*/
 
 	if (filetriggers_edited >= 0)
 		return;
@@ -528,14 +578,19 @@ trig_file_interests_ensure(void)
 			*slash = '\0';
 		}
 
-		pkg = pkg_spec_parse_pkg(space, &err);
-		if (pkg == NULL)
+		pair.triggeree = pkg_spec_parse_pkg(space, &err);
+		if(triggerer == NULL)
+			pair.triggerer = pair.triggeree;
+		else
+			pair.triggerer = triggerer;
+
+		if (pair.triggeree == NULL)
 			ohshit(_("file triggers record mentions illegal "
 			         "package name '%.250s' (for interest in file "
 			         "'%.250s'): %.250s"), space, linebuf, err.str);
-		pkgbin = &pkg->installed;
+		pkgbin = &pair.triggeree->installed;
 
-		trk_file_interest_change(linebuf, pkg, pkgbin, +2, trig_opts);
+		trk_file_interest_change(linebuf, pair, pkgbin, +2, trig_opts);
 	}
 	pop_cleanup(ehflag_normaltidy);
 ok:
@@ -558,7 +613,7 @@ trig_file_activate(struct fsys_namenode *trig, struct pkginfo *aw)
 
 	for (tfi = *trigh.namenode_interested(trig); tfi;
 	     tfi = tfi->samefile_next)
-		trig_record_activation(tfi->pkg, (tfi->options == TRIG_NOAWAIT) ?
+		trig_record_activation(tfi->pair, (tfi->options == TRIG_NOAWAIT) ?
 		                       NULL : aw, trigh.namenode_name(trig));
 }
 
@@ -635,7 +690,7 @@ trig_cicb_interest_change(const char *trig, struct pkginfo *pkg,
 		internerr("trigger control file for package %s not read",
 		          pkgbin_name(pkg, pkgbin, pnaw_always));
 
-	tki->interest_change(trig, pkg, pkgbin, signum, opts);
+	tki->interest_change(trig, (struct pkginfo_pair){pkg, pkg, __func__}, pkgbin, signum, opts);
 }
 
 void
@@ -763,7 +818,7 @@ static const struct trigdefmeths tdm_incorp = {
 };
 
 void
-trig_incorporate(enum modstatdb_rw cstatus)
+trig_incorporate(enum modstatdb_rw cstatus, struct pkginfo *triggerer)
 {
 	enum trigdef_update_status ur;
 	enum trigdef_update_flags tduf;
@@ -775,7 +830,7 @@ trig_incorporate(enum modstatdb_rw cstatus)
 	triggersfilefile = trig_get_filename(triggersdir, TRIGGERSFILEFILE);
 
 	trigdef_set_methods(&tdm_incorp);
-	trig_file_interests_ensure();
+	trig_file_interests_ensure(triggerer);
 
 	tduf = TDUF_NO_LOCK_OK;
 	if (cstatus >= msdbrw_write) {

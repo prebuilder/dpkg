@@ -143,7 +143,7 @@ verify(const char *const *argv)
 	struct pkginfo *pkg;
 	int rc = 0;
 
-	modstatdb_open(msdbrw_readonly);
+	modstatdb_open(msdbrw_readonly, NULL);
 	ensure_diversions();
 
 	if (!*argv) {

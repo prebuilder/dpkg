@@ -116,7 +116,7 @@ fsys_node_pkgs_iter_next(struct fsys_node_pkgs_iter *iter)
 	pkg_node = iter->pkg_node;
 	iter->pkg_node = pkg_node->next;
 
-	return pkg_node->pkg;
+	return pkg_node->pair.triggeree;
 }
 
 void

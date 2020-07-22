@@ -355,7 +355,7 @@ void cursesoff() {
 
 urqresult urq_list(void) {
   modstatdb_open(static_cast<modstatdb_rw>(msdbrw_writeifposs |
-                                           msdbrw_available_readonly));
+                                           msdbrw_available_readonly), NULL);
 
   curseson();
 

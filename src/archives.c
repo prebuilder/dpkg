@@ -1490,7 +1490,7 @@ archivefiles(const char *const *argv)
   else
     msdbflags = msdbrw_needsuperuser;
 
-  modstatdb_open(msdbflags);
+  modstatdb_open(msdbflags, NULL);
 
   checkpath();
   pkg_infodb_upgrade();
@@ -1580,6 +1580,7 @@ archivefiles(const char *const *argv)
 
     dpkg_selabel_load();
 
+    printf("archivefiles argp[%d] %p\n", i, argp[i]);
     process_archive(argp[i]);
     onerr_abort++;
     m_output(stdout, _("<standard output>"));

@@ -52,7 +52,7 @@ enum trig_options {
 };
 
 struct trigfileint {
-	struct pkginfo *pkg;
+	struct pkginfo_pair pair;
 	struct pkgbin *pkgbin;
 	struct fsys_namenode *fnn;
 	enum trig_options options;
@@ -68,7 +68,7 @@ struct trigfileint {
  * activations as the first run of a triggers-supporting dpkg.
  */
 struct trig_hooks {
-	void (*enqueue_deferred)(struct pkginfo *pend);
+	void (*enqueue_deferred)(struct pkginfo_pair pair);
 	void (*transitional_activate)(enum modstatdb_rw cstatus);
 
 	struct fsys_namenode *(*namenode_find)(const char *filename, bool nonew);
@@ -95,18 +95,18 @@ void trig_path_activate(struct fsys_namenode *trig, struct pkginfo *aw);
 bool trig_note_pend_core(struct pkginfo *pend, const char *trig /*not copied!*/);
 bool trig_note_pend(struct pkginfo *pend, const char *trig /*not copied!*/);
 bool trig_note_aw(struct pkginfo *pend, struct pkginfo *aw);
-void trig_clear_awaiters(struct pkginfo *notpend);
+void trig_clear_awaiters(struct pkginfo_pair notpend);
 
-typedef void trig_awaited_pend_foreach_func(struct pkginfo *pkg);
+typedef void trig_awaited_pend_foreach_func(struct pkginfo_pair pkg);
 
-void trig_awaited_pend_enqueue(struct pkginfo *pend);
+void trig_awaited_pend_enqueue(struct pkginfo_pair pend);
 void trig_awaited_pend_foreach(trig_awaited_pend_foreach_func *func);
 void trig_awaited_pend_free(void);
 
 void trig_fixup_awaiters(enum modstatdb_rw cstatus);
 
-void trig_file_interests_ensure(void);
-void trig_file_interests_save(void);
+void trig_file_interests_ensure(struct pkginfo *triggerer);
+void trig_file_interests_save(struct pkginfo *triggerer);
 
 typedef void trig_parse_cicb(const char *trig, struct pkginfo *pkg,
                              struct pkgbin *pkgbin, enum trig_options to);
@@ -120,7 +120,7 @@ void trig_parse_ci(const char *file, trig_parse_cicb *interest,
                    trig_parse_cicb *activate, struct pkginfo *pkg,
                    struct pkgbin *pkgbin);
 
-void trig_incorporate(enum modstatdb_rw cstatus);
+void trig_incorporate(enum modstatdb_rw cstatus, struct pkginfo *triggerer);
 
 /** @} */
 

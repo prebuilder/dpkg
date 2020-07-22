@@ -203,6 +203,7 @@ pkg_check_depcon(struct pkginfo *pkg, const char *pfilename)
   struct dependency *dsearch;
   struct deppossi *psearch;
   struct pkginfo *fixbytrigaw;
+  struct pkginfo_pair pair;
   static struct varbuf depprobwhy;
 
   /* Check if anything is installed that we conflict with, or not installed
@@ -240,8 +241,12 @@ pkg_check_depcon(struct pkginfo *pkg, const char *pfilename)
     case dep_predepends:
       if (!depisok(dsearch, &depprobwhy, NULL, &fixbytrigaw, true)) {
         if (fixbytrigaw) {
-          while (fixbytrigaw->trigaw.head)
-            trigproc(fixbytrigaw->trigaw.head->pend, TRIGPROC_REQUIRED);
+          while (fixbytrigaw->trigaw.head){
+            pair.triggeree = fixbytrigaw->trigaw.head->pend;
+            pair.triggerer = pkg;
+
+            trigproc(pair, TRIGPROC_REQUIRED);
+          }
         } else {
           varbuf_end_str(&depprobwhy);
           notice(_("regarding %s containing %s, pre-dependency problem:\n%s"),
@@ -296,7 +301,7 @@ pkg_deconfigure_others(struct pkginfo *pkg)
                           3, (void *)deconpil->pkg, (void *)removing, (void *)pkg);
 
     if (removing) {
-      maintscript_installed(deconpil->pkg, PRERMFILE, "pre-removal",
+      maintscript_installed_pair((struct pkginfo_pair) {deconpil->pkg, deconpil->pkg, __func__}, PRERMFILE, "pre-removal",
                             "deconfigure", "in-favour",
                             pkgbin_name(pkg, &pkg->available, pnaw_nonambig),
                             versiondescribe(&pkg->available.version,
@@ -307,7 +312,7 @@ pkg_deconfigure_others(struct pkginfo *pkg)
                                             vdew_nonambig),
                             NULL);
     } else {
-      maintscript_installed(deconpil->pkg, PRERMFILE, "pre-removal",
+      maintscript_installed_pair((struct pkginfo_pair) {deconpil->pkg, deconpil->pkg, __func__}, PRERMFILE, "pre-removal",
                             "deconfigure", "in-favour",
                             pkgbin_name(pkg, &pkg->available, pnaw_nonambig),
                             versiondescribe(&pkg->available.version,
@@ -452,7 +457,11 @@ static struct pkg_queue conflictors = PKG_QUEUE_INIT;
 void
 enqueue_conflictor(struct pkginfo *pkg)
 {
-  pkg_queue_push(&conflictors, pkg);
+  struct pkginfo_pair pair;
+  pair.triggeree = pkg;
+  pair.triggerer = pkg;
+  pair.source = __func__;
+  pkg_queue_push(&conflictors, pair);
 }
 
 static void
@@ -840,7 +849,7 @@ pkg_disappear(struct pkginfo *pkg, struct pkginfo *infavour)
         pkg_name(pkg, pnaw_always));
 
   trig_activate_packageprocessing(pkg);
-  maintscript_installed(pkg, POSTRMFILE,
+  maintscript_installed_pair((struct pkginfo_pair) {pkg, pkg, __func__}, POSTRMFILE,
                         "post-removal script (for disappearance)",
                         "disappear",
                         pkgbin_name(infavour, &infavour->available,
@@ -1173,6 +1182,7 @@ void process_archive(const char *filename) {
     parsedb_flags |= pdb_lax_version_parser;
 
   parsedb(cidir, parsedb_flags, &pkg);
+  printf("available arch type %d\n", pkg->available.arch->type);
 
   if (!pkg->archives) {
     pkg->archives = nfmalloc(sizeof(*pkg->archives));
@@ -1228,7 +1238,7 @@ void process_archive(const char *filename) {
 
   ensure_allinstfiles_available();
   fsys_hash_init();
-  trig_file_interests_ensure();
+  trig_file_interests_ensure(pkg);
 
   printf(_("Preparing to unpack %s ...\n"), pfilename);
 
@@ -1265,7 +1275,7 @@ void process_archive(const char *filename) {
   for (conflictor_iter = conflictors.head;
        conflictor_iter;
        conflictor_iter = conflictor_iter->next)
-    pkg_conffiles_mark_old(conflictor_iter->pkg);
+    pkg_conffiles_mark_old(conflictor_iter->pair.triggeree);
 
   oldversionstatus= pkg->status;
 
@@ -1290,7 +1300,7 @@ void process_archive(const char *filename) {
       maintscript_fallback(pkg, PRERMFILE, "pre-removal", cidir, cidirrest,
                            "upgrade", "failed-upgrade");
     else /* Downgrade => no fallback */
-      maintscript_installed(pkg, PRERMFILE, "pre-removal",
+      maintscript_installed_pair((struct pkginfo_pair) {pkg, pkg, __func__}, PRERMFILE, "pre-removal",
                             "upgrade",
                             versiondescribe(&pkg->available.version,
                                             vdew_nonambig),
@@ -1305,7 +1315,8 @@ void process_archive(const char *filename) {
   for (conflictor_iter = conflictors.head;
        conflictor_iter;
        conflictor_iter = conflictor_iter->next) {
-    struct pkginfo *conflictor = conflictor_iter->pkg;
+    struct pkginfo_pair conflictor_pair = conflictor_iter->pair;
+    struct pkginfo *conflictor = conflictor_pair.triggeree;
 
     if (!(conflictor->status == PKG_STAT_HALFCONFIGURED ||
           conflictor->status == PKG_STAT_TRIGGERSAWAITED ||
@@ -1315,17 +1326,17 @@ void process_archive(const char *filename) {
 
     trig_activate_packageprocessing(conflictor);
     pkg_set_status(conflictor, PKG_STAT_HALFCONFIGURED);
-    modstatdb_note(conflictor);
+    modstatdb_note_pair(conflictor_pair);
     push_cleanup(cu_prerminfavour, ~ehflag_normaltidy,
                  2, conflictor, pkg);
-    maintscript_installed(conflictor, PRERMFILE, "pre-removal",
+    maintscript_installed_pair(conflictor_pair, PRERMFILE, "pre-removal",
                           "remove", "in-favour",
                           pkgbin_name(pkg, &pkg->available, pnaw_nonambig),
                           versiondescribe(&pkg->available.version,
                                           vdew_nonambig),
                           NULL);
     pkg_set_status(conflictor, PKG_STAT_HALFINSTALLED);
-    modstatdb_note(conflictor);
+    modstatdb_note_pair(conflictor_pair);
   }
 
   pkg_set_eflags(pkg, PKG_EFLAG_REINSTREQ);
@@ -1338,12 +1349,12 @@ void process_archive(const char *filename) {
   if (oldversionstatus == PKG_STAT_NOTINSTALLED) {
     push_cleanup(cu_preinstverynew, ~ehflag_normaltidy,
                  3,(void*)pkg,(void*)cidir,(void*)cidirrest);
-    maintscript_new(pkg, PREINSTFILE, "pre-installation", cidir, cidirrest,
+    maintscript_new_pair((struct pkginfo_pair) {pkg, pkg, __func__}, PREINSTFILE, "pre-installation", cidir, cidirrest,
                     "install", NULL);
   } else if (oldversionstatus == PKG_STAT_CONFIGFILES) {
     push_cleanup(cu_preinstnew, ~ehflag_normaltidy,
                  3,(void*)pkg,(void*)cidir,(void*)cidirrest);
-    maintscript_new(pkg, PREINSTFILE, "pre-installation", cidir, cidirrest,
+    maintscript_new_pair((struct pkginfo_pair) {pkg, pkg, __func__}, PREINSTFILE, "pre-installation", cidir, cidirrest,
                     "install",
                     versiondescribe(&pkg->installed.version, vdew_nonambig),
                     versiondescribe(&pkg->available.version, vdew_nonambig),
@@ -1351,7 +1362,7 @@ void process_archive(const char *filename) {
   } else {
     push_cleanup(cu_preinstupgrade, ~ehflag_normaltidy,
                  4,(void*)pkg,(void*)cidir,(void*)cidirrest,(void*)&oldversionstatus);
-    maintscript_new(pkg, PREINSTFILE, "pre-installation", cidir, cidirrest,
+    maintscript_new_pair((struct pkginfo_pair) {pkg, pkg, __func__}, PREINSTFILE, "pre-installation", cidir, cidirrest,
                     "upgrade",
                     versiondescribe(&pkg->installed.version, vdew_nonambig),
                     versiondescribe(&pkg->available.version, vdew_nonambig),
@@ -1525,7 +1536,7 @@ void process_archive(const char *filename) {
   trig_parse_ci(pkg_infodb_get_file(pkg, &pkg->installed, TRIGGERSCIFILE),
                 trig_cicb_interest_delete, NULL, pkg, &pkg->installed);
   trig_parse_ci(cidir, trig_cicb_interest_add, NULL, pkg, &pkg->available);
-  trig_file_interests_save();
+  trig_file_interests_save(pkg);
 
   /* We also install the new maintainer scripts, and any other
    * cruft that may have come along with the package. First
@@ -1619,7 +1630,7 @@ void process_archive(const char *filename) {
    * as we have not yet updated the filename->packages mappings; however,
    * the package->filenames mapping is. */
   while (!pkg_queue_is_empty(&conflictors)) {
-    struct pkginfo *conflictor = pkg_queue_pop(&conflictors);
+    struct pkginfo *conflictor = pkg_queue_pop(&conflictors).triggeree;
 
     /* We need to have the most up-to-date info about which files are
      * what ... */
@@ -1628,5 +1639,5 @@ void process_archive(const char *filename) {
   }
 
   if (cipaction->arg_int == act_install)
-    enqueue_package_mark_seen(pkg);
+    enqueue_package_mark_seen(pkg, __func__);
 }

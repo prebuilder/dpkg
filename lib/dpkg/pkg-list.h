@@ -33,12 +33,12 @@ DPKG_BEGIN_DECLS
 
 struct pkg_list {
 	struct pkg_list *next;
-	struct pkginfo *pkg;
+	struct pkginfo_pair pair;
 };
 
-struct pkg_list *pkg_list_new(struct pkginfo *pkg, struct pkg_list *next);
+struct pkg_list *pkg_list_new(struct pkginfo_pair pair, struct pkg_list *next);
 void pkg_list_free(struct pkg_list *head);
-void pkg_list_prepend(struct pkg_list **head, struct pkginfo *pkg);
+void pkg_list_prepend(struct pkg_list **head, struct pkginfo_pair pair);
 
 /** @} */
 

@@ -48,36 +48,36 @@
 #include "main.h"
 
 void
-post_postinst_tasks(struct pkginfo *pkg, enum pkgstatus new_status)
+post_postinst_tasks(struct pkginfo_pair pair, enum pkgstatus new_status)
 {
 	if (new_status < PKG_STAT_TRIGGERSAWAITED)
-		pkg_set_status(pkg, new_status);
-	else if (pkg->trigaw.head)
-		pkg_set_status(pkg, PKG_STAT_TRIGGERSAWAITED);
-	else if (pkg->trigpend_head)
-		pkg_set_status(pkg, PKG_STAT_TRIGGERSPENDING);
+		pkg_set_status(pair.triggeree, new_status);
+	else if (pair.triggeree->trigaw.head)
+		pkg_set_status(pair.triggeree, PKG_STAT_TRIGGERSAWAITED);
+	else if (pair.triggeree->trigpend_head)
+		pkg_set_status(pair.triggeree, PKG_STAT_TRIGGERSPENDING);
 	else
-		pkg_set_status(pkg, PKG_STAT_INSTALLED);
-	modstatdb_note(pkg);
+		pkg_set_status(pair.triggeree, PKG_STAT_INSTALLED);
+	modstatdb_note_pair(pair);
 
 	debug(dbg_triggersdetail, "post_postinst_tasks - trig_incorporate");
-	trig_incorporate(modstatdb_get_status());
+	trig_incorporate(modstatdb_get_status(), pair.triggerer);
 }
 
 static void
-post_script_tasks(void)
+post_script_tasks(struct pkginfo *triggerer)
 {
 	debug(dbg_triggersdetail, "post_script_tasks - ensure_diversions");
 	ensure_diversions();
 
 	debug(dbg_triggersdetail, "post_script_tasks - trig_incorporate");
-	trig_incorporate(modstatdb_get_status());
+	trig_incorporate(modstatdb_get_status(), triggerer);
 }
 
 static void
 cu_post_script_tasks(int argc, void **argv)
 {
-	post_script_tasks();
+	post_script_tasks(NULL);
 }
 
 static void
@@ -169,7 +169,7 @@ maintscript_set_exec_context(struct command *cmd)
 }
 
 static int
-maintscript_exec(struct pkginfo *pkg, struct pkgbin *pkgbin,
+maintscript_exec(struct pkginfo_pair pair, struct pkgbin *pkgbin,
                  struct command *cmd, struct stat *stab, int warn)
 {
 	pid_t pid;
@@ -184,11 +184,20 @@ maintscript_exec(struct pkginfo *pkg, struct pkgbin *pkgbin,
 		char *pkg_count;
 		const char *maintscript_debug;
 
-		pkg_count = str_fmt("%d", pkgset_installed_instances(pkg->set));
+		pkg_count = str_fmt("%d", pkgset_installed_instances(pair.triggeree->set));
 
 		maintscript_debug = debug_has_flag(dbg_scripts) ? "1" : "0";
 
-		if (setenv("DPKG_MAINTSCRIPT_PACKAGE", pkg->set->name, 1) ||
+		char shit[1024];
+		memset(shit, 0, 1024);
+		sprintf(shit, "%s %s %p", pair.triggerer->set->name, pkgbin_name(pair.triggerer, &pair.triggerer->available, pnaw_nonambig), pair.triggerer);
+
+    if(pair.traceback)
+		    setenv("DPKG_TRIGGERER_STACK", pair.traceback, 1);
+
+		if (setenv("DPKG_MAINTSCRIPT_PACKAGE", pair.triggeree->set->name, 1) ||
+		    setenv("DPKG_TRIGGERER_PACKAGE", shit, 1) ||
+		    setenv("DPKG_TRIGGERER_SOURCE", pair.source, 1) ||
 		    setenv("DPKG_MAINTSCRIPT_PACKAGE_REFCOUNT", pkg_count, 1) ||
 		    setenv("DPKG_MAINTSCRIPT_ARCH", pkgbin->arch->name, 1) ||
 		    setenv("DPKG_MAINTSCRIPT_NAME", cmd->argv[0], 1) ||
@@ -214,7 +223,7 @@ maintscript_exec(struct pkginfo *pkg, struct pkgbin *pkgbin,
 }
 
 static int
-vmaintscript_installed(struct pkginfo *pkg, const char *scriptname,
+vmaintscript_installed(struct pkginfo_pair pair, const char *scriptname,
                        const char *desc, va_list args)
 {
 	struct command cmd;
@@ -222,9 +231,9 @@ vmaintscript_installed(struct pkginfo *pkg, const char *scriptname,
 	struct stat stab;
 	char *buf;
 
-	scriptpath = pkg_infodb_get_file(pkg, &pkg->installed, scriptname);
+	scriptpath = pkg_infodb_get_file(pair.triggeree, &pair.triggeree->installed, scriptname);
 	m_asprintf(&buf, _("installed %s package %s script"),
-	           pkg_name(pkg, pnaw_nonambig), desc);
+	           pkg_name(pair.triggeree, pnaw_nonambig), desc);
 
 	command_init(&cmd, scriptpath, buf);
 	command_add_arg(&cmd, scriptname);
@@ -242,7 +251,7 @@ vmaintscript_installed(struct pkginfo *pkg, const char *scriptname,
 		}
 		ohshite(_("unable to stat %s '%.250s'"), buf, scriptpath);
 	}
-	maintscript_exec(pkg, &pkg->installed, &cmd, &stab, 0);
+	maintscript_exec(pair, &pair.triggeree->installed, &cmd, &stab, 0);
 
 	command_destroy(&cmd);
 	free(buf);
@@ -255,30 +264,30 @@ vmaintscript_installed(struct pkginfo *pkg, const char *scriptname,
  */
 
 int
-maintscript_installed(struct pkginfo *pkg, const char *scriptname,
+maintscript_installed_pair(struct pkginfo_pair pair, const char *scriptname,
                       const char *desc, ...)
 {
 	va_list args;
 	int rc;
 
 	va_start(args, desc);
-	rc = vmaintscript_installed(pkg, scriptname, desc, args);
+	rc = vmaintscript_installed(pair, scriptname, desc, args);
 	va_end(args);
 
 	if (rc)
-		post_script_tasks();
+		post_script_tasks(pair.triggerer);
 
 	return rc;
 }
 
 int
-maintscript_postinst(struct pkginfo *pkg, ...)
+maintscript_postinst_pair(struct pkginfo_pair pair, ...)
 {
 	va_list args;
 	int rc;
 
-	va_start(args, pkg);
-	rc = vmaintscript_installed(pkg, POSTINSTFILE, "post-installation", args);
+	va_start(args, pair);
+	rc = vmaintscript_installed(pair, POSTINSTFILE, "post-installation", args);
 	va_end(args);
 
 	if (rc)
@@ -288,7 +297,7 @@ maintscript_postinst(struct pkginfo *pkg, ...)
 }
 
 int
-maintscript_new(struct pkginfo *pkg, const char *scriptname,
+maintscript_new_pair(struct pkginfo_pair pair, const char *scriptname,
                 const char *desc, const char *cidir, char *cidirrest, ...)
 {
 	struct command cmd;
@@ -298,7 +307,7 @@ maintscript_new(struct pkginfo *pkg, const char *scriptname,
 
 	strcpy(cidirrest, scriptname);
 	m_asprintf(&buf, _("new %s package %s script"),
-	           pkg_name(pkg, pnaw_nonambig), desc);
+	           pkg_name(pair.triggeree, pnaw_nonambig), desc);
 
 	va_start(args, cidirrest);
 	command_init(&cmd, cidir, buf);
@@ -318,11 +327,11 @@ maintscript_new(struct pkginfo *pkg, const char *scriptname,
 		}
 		ohshite(_("unable to stat %s '%.250s'"), buf, cidir);
 	}
-	maintscript_exec(pkg, &pkg->available, &cmd, &stab, 0);
+	maintscript_exec(pair, &pair.triggeree->available, &cmd, &stab, 0);
 
 	command_destroy(&cmd);
 	free(buf);
-	post_script_tasks();
+	post_script_tasks(pair.triggerer);
 
 	return 1;
 }
@@ -333,18 +342,27 @@ maintscript_fallback(struct pkginfo *pkg,
                      const char *cidir, char *cidirrest,
                      const char *ifok, const char *iffallback)
 {
+	return maintscript_fallback_pair((struct pkginfo_pair) {pkg, pkg, __func__}, scriptname, desc, cidir, cidirrest, ifok, iffallback);
+}
+
+int
+maintscript_fallback_pair(struct pkginfo_pair pair,
+                     const char *scriptname, const char *desc,
+                     const char *cidir, char *cidirrest,
+                     const char *ifok, const char *iffallback)
+{
 	struct command cmd;
 	const char *oldscriptpath;
 	struct stat stab;
 	char *buf;
 
-	oldscriptpath = pkg_infodb_get_file(pkg, &pkg->installed, scriptname);
+	oldscriptpath = pkg_infodb_get_file(pair.triggeree, &pair.triggeree->installed, scriptname);
 	m_asprintf(&buf, _("old %s package %s script"),
-	           pkg_name(pkg, pnaw_nonambig), desc);
+	           pkg_name(pair.triggeree, pnaw_nonambig), desc);
 
 	command_init(&cmd, oldscriptpath, buf);
 	command_add_args(&cmd, scriptname, ifok,
-	                 versiondescribe(&pkg->available.version, vdew_nonambig),
+	                 versiondescribe(&pair.triggeree->available.version, vdew_nonambig),
 	                 NULL);
 
 	if (stat(oldscriptpath, &stab)) {
@@ -359,10 +377,10 @@ maintscript_fallback(struct pkginfo *pkg,
 		warning(_("unable to stat %s '%.250s': %s"),
 		        cmd.name, oldscriptpath, strerror(errno));
 	} else {
-		if (!maintscript_exec(pkg, &pkg->installed, &cmd, &stab, SUBPROC_WARN)) {
+		if (!maintscript_exec(pair, &pair.triggeree->installed, &cmd, &stab, SUBPROC_WARN)) {
 			command_destroy(&cmd);
 			free(buf);
-			post_script_tasks();
+			post_script_tasks(pair.triggerer);
 			return 1;
 		}
 	}
@@ -370,13 +388,13 @@ maintscript_fallback(struct pkginfo *pkg,
 
 	strcpy(cidirrest, scriptname);
 	m_asprintf(&buf, _("new %s package %s script"),
-	           pkg_name(pkg, pnaw_nonambig), desc);
+	           pkg_name(pair.triggeree, pnaw_nonambig), desc);
 
 	command_destroy(&cmd);
 	command_init(&cmd, cidir, buf);
 	command_add_args(&cmd, scriptname, iffallback,
-	                 versiondescribe(&pkg->installed.version, vdew_nonambig),
-	                 versiondescribe(&pkg->available.version, vdew_nonambig),
+	                 versiondescribe(&pair.triggeree->installed.version, vdew_nonambig),
+	                 versiondescribe(&pair.triggeree->available.version, vdew_nonambig),
 	                 NULL);
 
 	if (stat(cidir, &stab)) {
@@ -388,12 +406,12 @@ maintscript_fallback(struct pkginfo *pkg,
 			ohshite(_("unable to stat %s '%.250s'"), buf, cidir);
 	}
 
-	maintscript_exec(pkg, &pkg->available, &cmd, &stab, 0);
+	maintscript_exec(pair, &pair.triggeree->available, &cmd, &stab, 0);
 	notice(_("... it looks like that went OK"));
 
 	command_destroy(&cmd);
 	free(buf);
-	post_script_tasks();
+	post_script_tasks(pair.triggerer);
 
 	return 1;
 }

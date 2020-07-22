@@ -48,7 +48,7 @@ main(int argc, const char *const *argv)
 	perf_ts_mark_print("init");
 
 	perf_ts_slot_start(&ps);
-	modstatdb_open(msdbrw_readonly | msdbrw_available_readonly);
+	modstatdb_open(msdbrw_readonly | msdbrw_available_readonly, NULL);
 	perf_ts_slot_stop(&ps);
 
 	perf_ts_slot_print(&ps, "modstatdb_init");

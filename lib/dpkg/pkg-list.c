@@ -36,12 +36,12 @@
  * @return The new package list node.
  */
 struct pkg_list *
-pkg_list_new(struct pkginfo *pkg, struct pkg_list *next)
+pkg_list_new(struct pkginfo_pair pair, struct pkg_list *next)
 {
 	struct pkg_list *node;
 
 	node = m_malloc(sizeof(*node));
-	node->pkg = pkg;
+	node->pair = pair;
 	node->next = next;
 
 	return node;
@@ -72,7 +72,7 @@ pkg_list_free(struct pkg_list *head)
  * @param pkg The pkginfo to prepend to the list.
  */
 void
-pkg_list_prepend(struct pkg_list **head, struct pkginfo *pkg)
+pkg_list_prepend(struct pkg_list **head, struct pkginfo_pair pair)
 {
-	*head = pkg_list_new(pkg, *head);
+	*head = pkg_list_new(pair, *head);
 }

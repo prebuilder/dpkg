@@ -193,7 +193,8 @@ int clearselections(const char *const *argv);
 
 void md5hash(struct pkginfo *pkg, char *hashbuf, const char *fn);
 void enqueue_package(struct pkginfo *pkg);
-void enqueue_package_mark_seen(struct pkginfo *pkg);
+void enqueue_pair(struct pkginfo_pair pair);
+void enqueue_package_mark_seen(struct pkginfo *pkg, char *func);
 void process_queue(void);
 int packages(const char *const *argv);
 void removal_bulk(struct pkginfo *pkg);
@@ -209,8 +210,8 @@ enum dep_check dependencies_ok(struct pkginfo *pkg, struct pkginfo *removing,
                                struct varbuf *aemsgs);
 enum dep_check breakses_ok(struct pkginfo *pkg, struct varbuf *aemsgs);
 
-void deferred_remove(struct pkginfo *pkg);
-void deferred_configure(struct pkginfo *pkg);
+void deferred_remove(struct pkginfo_pair pair);
+void deferred_configure(struct pkginfo_pair pair);
 
 /*
  * During the packages queue processing, the algorithm for deciding what to
@@ -289,13 +290,16 @@ struct fsys_namenode *
 namenodetouse(struct fsys_namenode *namenode,
               struct pkginfo *pkg, struct pkgbin *pkgbin);
 
-int maintscript_installed(struct pkginfo *pkg, const char *scriptname,
+int maintscript_installed_pair(struct pkginfo_pair pair, const char *scriptname,
                           const char *desc, ...) DPKG_ATTR_SENTINEL;
-int maintscript_new(struct pkginfo *pkg,
-                    const char *scriptname, const char *desc,
-                    const char *cidir, char *cidirrest, ...)
-	DPKG_ATTR_SENTINEL;
+int
+maintscript_new_pair(struct pkginfo_pair pair, const char *scriptname,
+                const char *desc, const char *cidir, char *cidirrest, ...)	DPKG_ATTR_SENTINEL;
 int maintscript_fallback(struct pkginfo *pkg,
+                         const char *scriptname, const char *desc,
+                         const char *cidir, char *cidirrest,
+                         const char *ifok, const char *iffallback);
+int maintscript_fallback_pair(struct pkginfo_pair pair,
                          const char *scriptname, const char *desc,
                          const char *cidir, char *cidirrest,
                          const char *ifok, const char *iffallback);
@@ -303,8 +307,8 @@ int maintscript_fallback(struct pkginfo *pkg,
 /* Callers wanting to run the postinst use these two as they want to postpone
  * trigger incorporation until after updating the package status. The effect
  * is that a package can trigger itself. */
-int maintscript_postinst(struct pkginfo *pkg, ...) DPKG_ATTR_SENTINEL;
-void post_postinst_tasks(struct pkginfo *pkg, enum pkgstatus new_status);
+int maintscript_postinst_pair(struct pkginfo_pair pair, ...) DPKG_ATTR_SENTINEL;
+void post_postinst_tasks(struct pkginfo_pair pair, enum pkgstatus new_status);
 
 void clear_istobes(void);
 bool
@@ -335,11 +339,11 @@ enum trigproc_type {
 };
 
 void trigproc_install_hooks(void);
-void trigproc_populate_deferred(void);
+void trigproc_populate_deferred(struct pkginfo *triggerer_pkg);
 void trigproc_run_deferred(void);
 void trigproc_reset_cycle(void);
 
-void trigproc(struct pkginfo *pkg, enum trigproc_type type);
+void trigproc(struct pkginfo_pair pair, enum trigproc_type type);
 
 void trig_activate_packageprocessing(struct pkginfo *pkg);
 

@@ -88,82 +88,82 @@ static void checkforremoval(struct pkginfo *pkgtoremove,
   }
 }
 
-void deferred_remove(struct pkginfo *pkg) {
+void deferred_remove(struct pkginfo_pair pair) {
   struct varbuf raemsgs = VARBUF_INIT;
   struct dependency *dep;
   enum dep_check rok;
 
   debug(dbg_general, "deferred_remove package %s",
-        pkg_name(pkg, pnaw_always));
+        pkg_name(pair.triggeree, pnaw_always));
 
-  if (!f_pending && pkg->want != PKG_WANT_UNKNOWN) {
+  if (!f_pending && pair.triggeree->want != PKG_WANT_UNKNOWN) {
     if (cipaction->arg_int == act_purge)
-      pkg_set_want(pkg, PKG_WANT_PURGE);
+      pkg_set_want(pair.triggeree, PKG_WANT_PURGE);
     else
-      pkg_set_want(pkg, PKG_WANT_DEINSTALL);
+      pkg_set_want(pair.triggeree, PKG_WANT_DEINSTALL);
 
     if (!f_noact)
-      modstatdb_note(pkg);
+      modstatdb_note_pair(pair);
   }
 
-  ensure_package_clientdata(pkg);
+  ensure_package_clientdata(pair.triggeree);
 
-  if (pkg->status == PKG_STAT_NOTINSTALLED) {
+  if (pair.triggeree->status == PKG_STAT_NOTINSTALLED) {
     sincenothing = 0;
     warning(_("ignoring request to remove %.250s which isn't installed"),
-            pkg_name(pkg, pnaw_nonambig));
-    pkg->clientdata->istobe = PKG_ISTOBE_NORMAL;
+            pkg_name(pair.triggeree, pnaw_nonambig));
+    pair.triggeree->clientdata->istobe = PKG_ISTOBE_NORMAL;
     return;
   } else if (!f_pending &&
-             pkg->status == PKG_STAT_CONFIGFILES &&
+             pair.triggeree->status == PKG_STAT_CONFIGFILES &&
              cipaction->arg_int != act_purge) {
     sincenothing = 0;
     warning(_("ignoring request to remove %.250s, only the config\n"
               " files of which are on the system; use --purge to remove them too"),
-            pkg_name(pkg, pnaw_nonambig));
-    pkg->clientdata->istobe = PKG_ISTOBE_NORMAL;
+            pkg_name(pair.triggeree, pnaw_nonambig));
+    pair.triggeree->clientdata->istobe = PKG_ISTOBE_NORMAL;
     return;
   }
 
-  if (pkg->status != PKG_STAT_CONFIGFILES) {
-    if (pkg->installed.essential)
+  if (pair.triggeree->status != PKG_STAT_CONFIGFILES) {
+    if (pair.triggeree->installed.essential)
       forcibleerr(FORCE_REMOVE_ESSENTIAL,
                   _("this is an essential package; it should not be removed"));
-    if (pkg->installed.is_protected)
+    if (pair.triggeree->installed.is_protected)
       forcibleerr(FORCE_REMOVE_PROTECTED,
                   _("this is a protected package; it should not be removed"));
   }
 
   debug(dbg_general, "checking dependencies for remove '%s'",
-        pkg_name(pkg, pnaw_always));
+        pkg_name(pair.triggeree, pnaw_always));
   rok = DEP_CHECK_OK;
-  checkforremoval(pkg, pkg->set, &rok, &raemsgs);
-  for (dep= pkg->installed.depends; dep; dep= dep->next) {
+  checkforremoval(pair.triggeree, pair.triggeree->set, &rok, &raemsgs);
+  for (dep= pair.triggeree->installed.depends; dep; dep= dep->next) {
     if (dep->type != dep_provides) continue;
     debug(dbg_depcon, "checking virtual package '%s'", dep->list->ed->name);
-    checkforremoval(pkg, dep->list->ed, &rok, &raemsgs);
+    checkforremoval(pair.triggeree, dep->list->ed, &rok, &raemsgs);
   }
 
   if (rok == DEP_CHECK_DEFER) {
     varbuf_destroy(&raemsgs);
-    pkg->clientdata->istobe = PKG_ISTOBE_REMOVE;
-    enqueue_package(pkg);
+    pair.triggeree->clientdata->istobe = PKG_ISTOBE_REMOVE;
+    enqueue_pair(pair);
     return;
   } else if (rok == DEP_CHECK_HALT) {
     sincenothing= 0;
     varbuf_end_str(&raemsgs);
     notice(_("dependency problems prevent removal of %s:\n%s"),
-            pkg_name(pkg, pnaw_nonambig), raemsgs.buf);
+            pkg_name(pair.triggeree, pnaw_nonambig), raemsgs.buf);
     ohshit(_("dependency problems - not removing"));
   } else if (raemsgs.used) {
     varbuf_end_str(&raemsgs);
     notice(_("%s: dependency problems, but removing anyway as you requested:\n%s"),
-            pkg_name(pkg, pnaw_nonambig), raemsgs.buf);
+            pkg_name(pair.triggeree, pnaw_nonambig), raemsgs.buf);
   }
   varbuf_destroy(&raemsgs);
   sincenothing= 0;
 
-  if (pkg->eflag & PKG_EFLAG_REINSTREQ)
+  if (pair.triggeree->eflag & PKG_EFLAG_REINSTREQ)
     forcibleerr(FORCE_REMOVE_REINSTREQ,
                 _("package is in a very bad inconsistent state; you should\n"
                   " reinstall it before attempting a removal"));
@@ -173,39 +173,39 @@ void deferred_remove(struct pkginfo *pkg) {
 
   if (f_noact) {
     printf(_("Would remove or purge %s (%s) ...\n"),
-           pkg_name(pkg, pnaw_nonambig),
-           versiondescribe(&pkg->installed.version, vdew_nonambig));
-    pkg_set_status(pkg, PKG_STAT_NOTINSTALLED);
-    pkg->clientdata->istobe = PKG_ISTOBE_NORMAL;
+           pkg_name(pair.triggeree, pnaw_nonambig),
+           versiondescribe(&pair.triggeree->installed.version, vdew_nonambig));
+    pkg_set_status(pair.triggeree, PKG_STAT_NOTINSTALLED);
+    pair.triggeree->clientdata->istobe = PKG_ISTOBE_NORMAL;
     return;
   }
 
-  pkg_conffiles_mark_old(pkg);
+  pkg_conffiles_mark_old(pair.triggeree);
 
   /* Only print and log removal action once. This avoids duplication when
    * using --remove and --purge in sequence. */
-  if (pkg->status > PKG_STAT_CONFIGFILES) {
-    printf(_("Removing %s (%s) ...\n"), pkg_name(pkg, pnaw_nonambig),
-           versiondescribe(&pkg->installed.version, vdew_nonambig));
-    log_action("remove", pkg, &pkg->installed);
+  if (pair.triggeree->status > PKG_STAT_CONFIGFILES) {
+    printf(_("Removing %s (%s) ...\n"), pkg_name(pair.triggeree, pnaw_nonambig),
+           versiondescribe(&pair.triggeree->installed.version, vdew_nonambig));
+    log_action("remove", pair.triggeree, &pair.triggeree->installed);
   }
 
-  trig_activate_packageprocessing(pkg);
-  if (pkg->status >= PKG_STAT_HALFCONFIGURED) {
+  trig_activate_packageprocessing(pair.triggeree);
+  if (pair.triggeree->status >= PKG_STAT_HALFCONFIGURED) {
     static enum pkgstatus oldpkgstatus;
 
-    oldpkgstatus= pkg->status;
-    pkg_set_status(pkg, PKG_STAT_HALFCONFIGURED);
-    modstatdb_note(pkg);
+    oldpkgstatus= pair.triggeree->status;
+    pkg_set_status(pair.triggeree, PKG_STAT_HALFCONFIGURED);
+    modstatdb_note_pair(pair);
     push_cleanup(cu_prermremove, ~ehflag_normaltidy, 2,
-                 (void *)pkg, (void *)&oldpkgstatus);
-    maintscript_installed(pkg, PRERMFILE, "pre-removal", "remove", NULL);
+                 (void *)pair.triggeree, (void *)&oldpkgstatus);
+    maintscript_installed_pair(pair, PRERMFILE, "pre-removal", "remove", NULL);
 
     /* Will turn into ‘half-installed’ soon ... */
-    pkg_set_status(pkg, PKG_STAT_UNPACKED);
+    pkg_set_status(pair.triggeree, PKG_STAT_UNPACKED);
   }
 
-  removal_bulk(pkg);
+  removal_bulk(pair.triggeree);
 }
 
 static void
@@ -272,9 +272,10 @@ removal_bulk_remove_files(struct pkginfo *pkg)
   static struct varbuf fnvb;
   struct varbuf_state fnvb_state;
   struct stat stab;
+  struct pkginfo_pair pair = {pkg, pkg, __func__};
 
     pkg_set_status(pkg, PKG_STAT_HALFINSTALLED);
-    modstatdb_note(pkg);
+    modstatdb_note_pair(pair);
     push_checkpoint(~ehflag_bombout, ehflag_normaltidy);
 
     fsys_hash_rev_iter_init(&rev_iter, pkg->files);
@@ -371,11 +372,11 @@ removal_bulk_remove_files(struct pkginfo *pkg)
         ohshite(_("unable to securely remove '%.250s'"), fnvb.buf);
     }
     write_filelist_except(pkg, &pkg->installed, leftover, 0);
-    maintscript_installed(pkg, POSTRMFILE, "post-removal", "remove", NULL);
+    maintscript_installed_pair((struct pkginfo_pair) {pkg, pkg, __func__}, POSTRMFILE, "post-removal", "remove", NULL);
 
     trig_parse_ci(pkg_infodb_get_file(pkg, &pkg->installed, TRIGGERSCIFILE),
                   trig_cicb_interest_delete, NULL, pkg, &pkg->installed);
-    trig_file_interests_save();
+    trig_file_interests_save(pkg);
 
     debug(dbg_general, "removal_bulk cleaning info directory");
     pkg_infodb_foreach(pkg, &pkg->installed, removal_bulk_remove_file);
@@ -384,7 +385,7 @@ removal_bulk_remove_files(struct pkginfo *pkg)
     pkg_set_status(pkg, PKG_STAT_CONFIGFILES);
     pkg->installed.essential = false;
     pkg->installed.is_protected = false;
-    modstatdb_note(pkg);
+    modstatdb_note_pair(pair);
     push_checkpoint(~ehflag_bombout, ehflag_normaltidy);
 }
 
@@ -394,11 +395,12 @@ static void removal_bulk_remove_leftover_dirs(struct pkginfo *pkg) {
   struct fsys_namenode *namenode;
   static struct varbuf fnvb;
   struct stat stab;
+  struct pkginfo_pair pair = {pkg, pkg, __func__};
 
   /* We may have modified this previously. */
   ensure_packagefiles_available(pkg);
 
-  modstatdb_note(pkg);
+  modstatdb_note_pair(pair);
   push_checkpoint(~ehflag_bombout, ehflag_normaltidy);
 
   fsys_hash_rev_iter_init(&rev_iter, pkg->files);
@@ -623,7 +625,7 @@ static void removal_bulk_remove_configfiles(struct pkginfo *pkg) {
     pkg->installed.conffiles = NULL;
     modstatdb_note(pkg);
 
-    maintscript_installed(pkg, POSTRMFILE, "post-removal", "purge", NULL);
+    maintscript_installed_pair((struct pkginfo_pair) {pkg, pkg, __func__}, POSTRMFILE, "post-removal", "purge", NULL);
 }
 
 /*

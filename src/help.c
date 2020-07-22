@@ -156,7 +156,7 @@ ignore_depends(struct pkginfo *pkg)
 {
   struct pkg_list *id;
   for (id= ignoredependss; id; id= id->next)
-    if (id->pkg == pkg)
+    if (id->pair.triggeree == pkg)
       return true;
   return false;
 }

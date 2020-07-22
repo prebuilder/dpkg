@@ -713,6 +713,6 @@ f_trigaw(struct pkginfo *aw, struct pkgbin *pkgbin,
       parse_error(ps,
                   _("duplicate awaited trigger package '%.255s'"), word);
 
-    trig_awaited_pend_enqueue(pend);
+    trig_awaited_pend_enqueue((struct pkginfo_pair) {pend, pend, __func__});
   }
 }
